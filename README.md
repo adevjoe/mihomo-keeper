@@ -1,7 +1,5 @@
 # mihomo-keeper
 
-本 fork 基于 [adevjoe/mihomo-keeper](https://github.com/adevjoe/mihomo-keeper)，增加了 Token 自动登录和 Bearer API 认证。
-
 一个给 Linux 服务器上的 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta 内核）用的轻量运维管理页：
 **订阅更新 + 本地 override 合并、规则增删、配置备份回滚、服务控制、日志、内核与 GeoIP 数据库更新**，都在一个网页里完成。
 
@@ -98,7 +96,7 @@ GitHub 直连下载失败时，内核 / 数据库下载会自动改走本机 mih
 ### 一键安装
 
 ```bash
-git clone https://github.com/ltinyho/mihomo-keeper.git
+git clone https://github.com/adevjoe/mihomo-keeper.git
 cd mihomo-keeper
 
 # 订阅地址只在首次安装时写入 /etc/mihomo/subscription.url（也可以之后手动写）

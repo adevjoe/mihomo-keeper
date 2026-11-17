@@ -1,7 +1,5 @@
 # mihomo-keeper
 
-This fork of [adevjoe/mihomo-keeper](https://github.com/adevjoe/mihomo-keeper) adds token auto-login and Bearer API authentication.
-
 A lightweight web console for operating [mihomo](https://github.com/MetaCubeX/mihomo) (Clash.Meta core) on a Linux server with systemd:
 **subscription update + local override merge, rule editing, config backup/rollback, service control, logs, kernel and GeoIP database updates.**
 
@@ -29,7 +27,7 @@ Merge semantics of `merge-config.py` (deep merge, glob-patched `proxy-groups`, `
 Requirements: Linux + systemd, root, Python 3.8+, PyYAML (`apt install python3-yaml`), curl, a mihomo binary (default `/usr/local/bin/mihomo`).
 
 ```bash
-git clone https://github.com/ltinyho/mihomo-keeper.git && cd mihomo-keeper
+git clone https://github.com/adevjoe/mihomo-keeper.git && cd mihomo-keeper
 sudo MIHOMO_SUB_URL='https://your-subscription-link' ./deploy/install.sh [--enable-timer] [--no-start]
 ```
 
