@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- 外部面板跳转地址改为可配置：新增 `MANAGER_DASHBOARD_URL`（支持 `{host}` / `{port}` / `{secret}` 占位符）和 `MANAGER_DASHBOARD_NAME`。
+  **去掉了默认的 metacubexd 跳转**（原来固定为 `http://<host>:<controller 端口>/ui/`）：未配置时顶部不再显示面板链接；`/api/status` 也只在模板使用 `{secret}` 时才返回 controller secret。
+
 ## [0.1.0] - 2026-11-17
 
 首个开源整理版本。功能与作者自用版本一致，只做了开源所需的整理和少量改动：
