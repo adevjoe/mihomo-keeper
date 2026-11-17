@@ -1,0 +1,34 @@
+# ---- runtime data / private files: never commit ----
+config.yaml
+config.yaml.*
+override.yaml
+override.yaml.*
+!override.example.yaml
+subscription.url
+manager.secret
+*.secret
+*.env
+!deploy/manager.env.example
+backup/
+proxies/
+rules/
+ruleset/
+providers/
+cache.db
+*.mmdb
+*.metadb
+*.dat
+*.bak
+*.bak.*
+*.bak-*
+*.tmp
+ui/
+
+# ---- python / editor / os ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store

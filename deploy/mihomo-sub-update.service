@@ -1,0 +1,10 @@
+[Unit]
+Description=Update mihomo subscription (download + merge override.yaml + validate + restart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MIHOMO_DIR=/etc/mihomo
+EnvironmentFile=-/etc/default/mihomo-manager
+ExecStart=/usr/bin/env bash /etc/mihomo/update-subscription.sh

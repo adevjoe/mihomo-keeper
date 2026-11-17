@@ -1,0 +1,70 @@
+# override.example.yaml —— 本地覆盖配置示例（复制为 $MIHOMO_DIR/override.yaml 后按需修改）
+#
+# 每次 update-subscription.sh 拉取订阅后，本文件会被深合并到订阅配置上，生成 config.yaml。
+# 合并规则（见 merge-config.py）：
+#   - 字典递归合并，标量以本文件为准
+#   - proxy-groups 按 name 合并，name 支持通配符（如 "*Auto*" 命中所有同名模式的组）；
+#     不含通配符且订阅里不存在的 name 会作为新组追加
+#   - 规则用 rules-prepend / rules-append / rules-insert 增量插入，不要直接写 rules（会整体替换）
+#   - 其它列表（proxies / fake-ip-filter 等）整体替换
+#   - 值写成 null 表示删除该字段
+#   - 以 "x-" 开头的顶层键只在本文件内使用（放 YAML 锚点等），合并时丢弃
+#
+# 下面全部是示例值，请换成你自己的设置。
+
+# ---- 外部面板（如 metacubexd），ui 目录相对 mihomo 工作目录 ----
+# 面板需要从局域网访问时监听 0.0.0.0，并务必设置 secret
+# external-controller: 0.0.0.0:9090
+# secret: change-me            # 控制器密钥；管理页「打开面板」链接会自动带上
+# external-ui: ui              # 把 metacubexd 构建产物放到 $MIHOMO_DIR/ui
+
+# ---- 测速 / 连接调优 ----
+unified-delay: true
+tcp-concurrent: true
+
+# ---- DNS 示例：国内域名走国内 DoH，其余走国外 DoH ----
+dns:
+  respect-rules: true
+  nameserver:
+    - https://dns.google/dns-query
+    - https://cloudflare-dns.com/dns-query
+  nameserver-policy:
+    "geosite:cn":
+      - https://doh.pub/dns-query
+      - https://dns.alidns.com/dns-query
+  proxy-server-nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "+.example.internal"
+  # 删除订阅里的 fallback 配置
+  fallback: null
+  fallback-filter: null
+
+# ---- TUN 示例：不接管某些网段（如局域网 / 组网软件网段） ----
+# tun:
+#   route-exclude-address:
+#     - 192.168.0.0/16
+#     - 100.64.0.0/10
+
+# ---- 策略组补丁示例 ----
+# proxy-groups:
+#   - name: "*Auto*"            # 通配符：修改所有匹配的组
+#     interval: 300
+#     tolerance: 50
+#   - name: My Group            # 订阅里没有的组会被追加
+#     type: select
+#     proxies: [DIRECT]
+
+# ---- 规则增量插入（管理页「规则」页可表单编辑 prepend / append） ----
+rules-prepend:
+  - DOMAIN-SUFFIX,example.com,DIRECT
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+rules-append:
+  - DOMAIN-KEYWORD,example,DIRECT
+# rules-insert:
+#   - before: "GEOIP,CN,DIRECT"      # 必须与订阅中的某条规则完全一致
+#     rules:
+#       - DOMAIN-SUFFIX,example.org,DIRECT
