@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Dedicated manager tokens for browser auto-login links and Bearer API authentication, alongside existing HTTP Basic authentication.
+- Signed HttpOnly / SameSite=Strict sessions (seven days by default), logout, token rotation, and query redaction in access logs.
+- Installer-generated `manager.token`, environment settings, authentication integration tests, and Chinese / English documentation.
+
 ## [0.1.0] - 2026-11-17
 
 首个开源整理版本。功能与作者自用版本一致，只做了开源所需的整理和少量改动：

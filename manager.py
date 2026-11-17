@@ -2,8 +2,8 @@
 """mihomo-keeper: mihomo 运维管理页：订阅更新 / override 编辑 / 备份回滚 / 服务控制 / 日志。
 
 零依赖，仅 Python 标准库 + PyYAML（merge-config.py 已依赖）。
-认证：HTTP Basic，用户默认 admin（MANAGER_USER），密码取自环境变量 MANAGER_PASSWORD，
-或密码文件（默认 $MIHOMO_DIR/manager.secret，可用 MANAGER_SECRET_FILE 指定）。
+认证：HTTP Basic 或专用 Token。Token 支持链接自动登录（HttpOnly 会话 Cookie）和 Bearer API 认证。
+密码和 Token 分别取自环境变量或 manager.secret / manager.token 文件。
 
 所有路径 / 端口均可用环境变量配置，详见 README.md「配置」一节。
 """
@@ -15,7 +15,9 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
+import ssl
 import struct
 import subprocess
 import sys
@@ -25,6 +27,7 @@ import time
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -39,6 +42,9 @@ MERGE_SCRIPT = Path(os.environ.get("MERGE_SCRIPT", str(APP_DIR / "merge-config.p
 UPDATE_SCRIPT = Path(os.environ.get("UPDATE_SCRIPT", str(APP_DIR / "update-subscription.sh")))
 BACKUP_DIR = MIHOMO_DIR / "backup"
 SECRET_FILE = Path(os.environ.get("MANAGER_SECRET_FILE", str(MIHOMO_DIR / "manager.secret")))
+TOKEN_FILE = Path(os.environ.get("MANAGER_TOKEN_FILE", str(MIHOMO_DIR / "manager.token")))
+SESSION_MAX_AGE = int(os.environ.get("MANAGER_SESSION_MAX_AGE", "604800"))
+SESSION_COOKIE = "mihomo_manager_session"
 SUB_URL_FILE = Path(os.environ.get("MIHOMO_SUB_URL_FILE", str(MIHOMO_DIR / "subscription.url")))
 LISTEN = os.environ.get("MANAGER_LISTEN", "0.0.0.0:9092")
 AUTH_USER = os.environ.get("MANAGER_USER", "admin")
@@ -66,6 +72,14 @@ def load_password():
         return os.environ["MANAGER_PASSWORD"].strip()
     if SECRET_FILE.exists():
         return SECRET_FILE.read_text().strip()
+    return ""
+
+
+def load_token():
+    if os.environ.get("MANAGER_TOKEN"):
+        return os.environ["MANAGER_TOKEN"].strip()
+    if TOKEN_FILE.exists():
+        return TOKEN_FILE.read_text().strip()
     return ""
 
 
@@ -884,17 +898,77 @@ def api_proxies():
 class Handler(BaseHTTPRequestHandler):
     server_version = "mihomo-manager/1.0"
     PASSWORD = load_password()
+    TOKEN = load_token()
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+        # Hide whole query strings, including percent-encoded token parameter names.
+        message = re.sub(r"\?[^\s\"]*", "?[REDACTED]", fmt % args)
+        sys.stderr.write("%s - %s\n" % (self.address_string(), message))
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
+
+    def _valid_token(self, token):
+        return bool(self.TOKEN) and isinstance(token, str) and \
+            hmac.compare_digest(token.encode(), self.TOKEN.encode())
+
+    def _valid_session(self):
+        if not self.TOKEN:
+            return False
+        try:
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            value = cookies[SESSION_COOKIE].value
+            expires, nonce, signature = value.split(".")
+            expected = hmac.new(self.TOKEN.encode(), f"{expires}.{nonce}".encode(), "sha256").hexdigest()
+            return int(expires) > time.time() and hmac.compare_digest(signature.encode(), expected.encode())
+        except (CookieError, KeyError, ValueError):
+            return False
+
+    def _session_cookie(self, clear=False):
+        cookies = SimpleCookie()
+        if clear:
+            value = ""
+        else:
+            payload = f"{int(time.time()) + SESSION_MAX_AGE}.{secrets.token_urlsafe(18)}"
+            signature = hmac.new(self.TOKEN.encode(), payload.encode(), "sha256").hexdigest()
+            value = f"{payload}.{signature}"
+        cookies[SESSION_COOKIE] = value
+        cookie = cookies[SESSION_COOKIE]
+        cookie["path"] = "/"
+        cookie["httponly"] = True
+        cookie["samesite"] = "Strict"
+        cookie["max-age"] = 0 if clear else SESSION_MAX_AGE
+        if isinstance(self.connection, ssl.SSLSocket):
+            cookie["secure"] = True
+        return cookie.OutputString()
+
+    def _login(self, token, redirect=False):
+        if not self._valid_token(token):
+            self._json({"ok": False, "error": "invalid token"}, 401)
+            return
+        cookie = self._session_cookie()
+        if redirect:
+            self.send_response(303)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", cookie)
+            self.end_headers()
+        else:
+            self._json({"ok": True}, cookie=cookie)
 
     def _auth(self):
-        if not self.PASSWORD:
+        if not self.PASSWORD and not self.TOKEN:
             return True
         h = self.headers.get("Authorization", "")
-        if h.startswith("Basic "):
+        scheme, _, credentials = h.partition(" ")
+        if scheme.lower() == "bearer" and self._valid_token(credentials):
+            return True
+        if self._valid_session():
+            return True
+        if self.PASSWORD and scheme.lower() == "basic":
             try:
-                user, _, pw = base64.b64decode(h[6:]).decode().partition(":")
+                user, _, pw = base64.b64decode(credentials).decode().partition(":")
             except Exception:
                 user, pw = "", ""
             if hmac.compare_digest(user.encode(), AUTH_USER.encode()) and \
@@ -907,27 +981,42 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"auth required")
         return False
 
-    def _json(self, obj, code=200):
+    def _json(self, obj, code=200, cookie=None):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
-    def _body(self):
+    def _body(self, max_bytes=None):
         n = int(self.headers.get("Content-Length") or 0)
+        if n < 0 or (max_bytes is not None and n > max_bytes):
+            raise ValueError("invalid request body size")
         raw = self.rfile.read(n) if n else b""
         if not raw:
             return {}
         return json.loads(raw.decode("utf-8"))
 
     def do_GET(self):
+        u = urlparse(self.path)
+        q = parse_qs(u.query, keep_blank_values=True)
+        if u.path == "/login":
+            body = LOGIN_HTML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if u.path == "/" and "token" in q:
+            tokens = q.get("token", [])
+            self._login(tokens[0] if len(tokens) == 1 else None, redirect=True)
+            return
         if not self._auth():
             return
-        u = urlparse(self.path)
-        q = parse_qs(u.query)
         try:
             if u.path == "/":
                 body = HTML.encode()
@@ -964,12 +1053,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": f"{type(ex).__name__}: {ex}"}, 500)
 
     def do_POST(self):
+        u = urlparse(self.path)
+        if u.path == "/api/auth/login":
+            try:
+                data = self._body(max_bytes=4096)
+                if not isinstance(data, dict):
+                    raise ValueError("expected a JSON object")
+            except (ValueError, UnicodeError):
+                self._json({"ok": False, "error": "invalid login request"}, 400)
+                return
+            self._login(data.get("token"))
+            return
         if not self._auth():
             return
-        u = urlparse(self.path)
         try:
             data = self._body()
-            if u.path == "/api/update":
+            if u.path == "/api/auth/logout":
+                self._json({"ok": True}, cookie=self._session_cookie(clear=True))
+            elif u.path == "/api/update":
                 self._json(api_update())
             elif u.path == "/api/override/validate":
                 self._json(api_override_validate(data.get("content", "")))
@@ -1000,6 +1101,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "not found"}, 404)
         except Exception as ex:
             self._json({"ok": False, "error": f"{type(ex).__name__}: {ex}"}, 500)
+
+
+LOGIN_HTML = r"""<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mihomo 管理 · 登录</title></head>
+<body><p id="message">正在登录…</p><noscript>自动登录需要启用 JavaScript。</noscript>
+<script>
+(async()=>{
+ const token=new URLSearchParams(location.hash.slice(1)).get('token');
+ history.replaceState(null,'',location.pathname);
+ try{
+  if(!token)throw new Error('登录链接缺少 Token。');
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+  if(!r.ok)throw new Error('登录链接无效，请检查 Token。');
+  location.replace('/');
+ }catch(e){document.getElementById('message').textContent=e.message}
+})();
+</script></body></html>
+"""
 
 
 HTML = r"""<!doctype html>
@@ -1547,8 +1667,10 @@ const H0=location.hash.slice(1);if(H0&&H0!=='status'&&LOADERS[H0])showTab(H0,fal
 
 def main():
     host, port = LISTEN.rsplit(":", 1)
-    if not Handler.PASSWORD:
-        print(f"WARN: no MANAGER_PASSWORD and no {SECRET_FILE}, running WITHOUT auth", file=sys.stderr)
+    if SESSION_MAX_AGE <= 0:
+        raise ValueError("MANAGER_SESSION_MAX_AGE must be positive")
+    if not Handler.PASSWORD and not Handler.TOKEN:
+        print("WARN: no manager password or token configured, running WITHOUT auth", file=sys.stderr)
     srv = ThreadingHTTPServer((host, int(port)), Handler)
     srv.daemon_threads = True
     print(f"mihomo-manager listening on {LISTEN}", file=sys.stderr)

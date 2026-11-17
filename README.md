@@ -78,6 +78,7 @@ GitHub 直连下载失败时，内核 / 数据库下载会自动改走本机 mih
 ├── override.yaml        # 你的本地覆盖
 ├── subscription.url     # 订阅地址（chmod 600）
 ├── manager.secret       # 管理页密码（chmod 600）
+├── manager.token        # 管理页自动登录 Token（chmod 600）
 ├── backup/              # config.yaml 历史备份
 ├── geoip.metadb / ASN.mmdb ...
 └── ui/                  # 可选：metacubexd 面板
@@ -104,7 +105,7 @@ sudo MIHOMO_SUB_URL='https://your-subscription-link' ./deploy/install.sh
 #           --force-units 覆盖已存在的 mihomo.service
 ```
 
-安装脚本是幂等的，**不会覆盖**已存在的 `override.yaml`、`subscription.url`、`manager.secret`、`/etc/default/mihomo-manager`；首次安装会生成随机密码并打印一次（保存在 `manager.secret`）。
+安装脚本是幂等的，**不会覆盖**已存在的 `override.yaml`、`subscription.url`、`manager.secret`、`manager.token`、`/etc/default/mihomo-manager`；首次安装会生成随机密码和独立 Token 并打印一次（分别保存在 `manager.secret`、`manager.token`）。
 
 然后：
 
@@ -148,6 +149,30 @@ MIHOMO_DIR=/tmp/mk MANAGER_LISTEN=127.0.0.1:9092 MANAGER_PASSWORD=test python3 m
 2. 在 `override.yaml` 中设置 `external-controller`、`secret`、`external-ui: ui`
 3. 管理页顶部的「metacubexd」链接会自动用当前主机名 + controller 端口 + secret 打开 `http://<host>:<port>/ui/`
 
+### Token 自动登录
+
+Token 与管理页密码、mihomo controller 的 `secret` 相互独立。安装脚本会创建 `manager.token`；已有部署也可以手动启用：
+
+```bash
+sudo sh -c 'umask 077; python3 -c "import secrets; print(secrets.token_urlsafe(32))" > /etc/mihomo/manager.token'
+sudo systemctl restart mihomo-manager.service
+sudo cat /etc/mihomo/manager.token
+```
+
+把 Token 填入链接后打开：
+
+```text
+http://<服务器>:9092/login#token=<Token>
+```
+
+页面会自动登录、清除地址栏中的 Token 并跳转到首页。`#token` 不会随页面请求发送给服务器；登录请求通过 JSON 提交 Token，成功后用 `HttpOnly`、`SameSite=Strict` Cookie 保持会话，默认有效期为 7 天，刷新页面或重启管理服务后仍有效。
+
+也支持 `http://<服务器>:9092/?token=<Token>`：验证成功后设置相同的会话 Cookie，并立即重定向到不含 Token 的首页。管理服务不会记录请求的查询参数；使用反向代理时，优先用上面的 `#token` 链接，避免 Token 出现在代理访问日志中。
+
+API 可直接使用 `Authorization: Bearer <Token>`；账号密码的 HTTP Basic 认证继续可用。`POST /api/auth/logout` 可以清除当前浏览器的会话 Cookie（请求体为 `{}`）。Token 登录不会修改浏览器已缓存的 Basic 凭据。
+
+Token 和自动登录链接都拥有管理页的完整权限，请像密码一样保管。替换 `manager.token` 并重启 `mihomo-manager.service` 后，旧 Token 和所有旧会话立即失效。若设置了 `MANAGER_TOKEN`，需要更改该环境变量。
+
 ## 配置
 
 全部通过环境变量配置，systemd 部署时写在 `/etc/default/mihomo-manager`（见 [`deploy/manager.env.example`](deploy/manager.env.example)），`mihomo-manager.service` 和 `mihomo-sub-update.service` 都会读取。
@@ -161,6 +186,9 @@ MIHOMO_DIR=/tmp/mk MANAGER_LISTEN=127.0.0.1:9092 MANAGER_PASSWORD=test python3 m
 | `MANAGER_USER` | `admin` | HTTP Basic 用户名 |
 | `MANAGER_PASSWORD` | 空 | 管理页密码；优先于密码文件 |
 | `MANAGER_SECRET_FILE` | `$MIHOMO_DIR/manager.secret` | 密码文件（取首行） |
+| `MANAGER_TOKEN` | 空 | 专用自动登录 / Bearer API Token；优先于 Token 文件 |
+| `MANAGER_TOKEN_FILE` | `$MIHOMO_DIR/manager.token` | Token 文件 |
+| `MANAGER_SESSION_MAX_AGE` | `604800` | Token 登录会话有效期，单位为秒（默认 7 天，必须大于 0） |
 | `MIHOMO_SUB_URL` | 空 | 订阅地址；优先于订阅地址文件 |
 | `MIHOMO_SUB_URL_FILE` | `$MIHOMO_DIR/subscription.url` | 订阅地址文件（取首个非注释行） |
 | `MERGE_SCRIPT` | 与 manager.py 同目录的 `merge-config.py` | 合并脚本路径 |
@@ -172,10 +200,10 @@ mihomo 的 controller 地址和 secret 直接从 `config.yaml` 的 `external-con
 ## 安全提示
 
 - **默认监听 `0.0.0.0:9092`，整个局域网都能访问。** 管理页以 root 运行，能修改配置、重启服务、下载并替换内核二进制，等同于这台机器的 root 权限。
-- **一定要设置强密码**（`manager.secret` 或 `MANAGER_PASSWORD`）。没有密码时管理页会**无认证运行**（启动日志会有 WARN）。
+- **一定要设置强密码或 Token**（`manager.secret` / `MANAGER_PASSWORD`，或 `manager.token` / `MANAGER_TOKEN`）。两者都没有时管理页会**无认证运行**（启动日志会有 WARN）。
 - HTTP Basic 认证是明文传输的：只在可信内网使用；需要跨网络访问时，请改为 `MANAGER_LISTEN=127.0.0.1:9092`，再通过 Nginx / Caddy 等反向代理加 HTTPS（以及额外的访问控制），或通过 VPN / Tailscale 等访问。**不要直接暴露到公网。**
 - 状态接口会把 mihomo controller 的 `secret` 返回给已登录的页面（用于一键打开面板），请把管理页密码视为与 controller secret 同等敏感。
-- `subscription.url`、`manager.secret`、`override.yaml`、`config.yaml`、`backup/` 都包含敏感信息，保持 `chmod 600/700`，不要提交到任何仓库（本仓库的 `.gitignore` 已排除）。
+- `subscription.url`、`manager.secret`、`manager.token`、`override.yaml`、`config.yaml`、`backup/` 都包含敏感信息，保持 `chmod 600/700`，不要提交到任何仓库（本仓库的 `.gitignore` 已排除）。
 - 内核更新只允许安装 `https://github.com/MetaCubeX/mihomo/releases/download/` 下的 `.gz` 资产。
 
 ## 从旧版（订阅地址写死在脚本里）迁移
