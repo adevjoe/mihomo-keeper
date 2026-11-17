@@ -25,7 +25,7 @@
 
 | 页面 | 能做什么 |
 | --- | --- |
-| 状态 | mihomo 服务状态、内核版本、配置/override 修改时间、备份数量、订阅地址（脱敏显示），一键更新订阅、重载 / 重启 / 校验配置，跳转到 metacubexd 面板 |
+| 状态 | mihomo 服务状态、内核版本、配置/override 修改时间、备份数量、订阅地址（脱敏显示），一键更新订阅、重载 / 重启 / 校验配置，可选跳转到外部面板（metacubexd 等，需配置 `MANAGER_DASHBOARD_URL`） |
 | 规则 | 表单方式编辑 override 中的 `rules-prepend` / `rules-append`，策略组和规则集自动补全，格式校验；保存时只替换对应 YAML 块，保留其他注释 |
 | 策略组 | 查看并切换 Selector / URLTest / Fallback 等策略组当前选择（通过 mihomo external-controller） |
 | override | 在线编辑 `override.yaml`；「校验」会下载订阅 → 合并 → `mihomo -t`，并给出与当前 config.yaml 的 diff，不落盘；保存时自动保留最近 10 份 override 备份，可选立即应用 |
@@ -146,7 +146,17 @@ MIHOMO_DIR=/tmp/mk MANAGER_LISTEN=127.0.0.1:9092 MANAGER_PASSWORD=test python3 m
 
 1. 下载 [metacubexd](https://github.com/MetaCubeX/metacubexd/releases) 的构建产物（`compressed-dist.tgz`），解压到 `/etc/mihomo/ui`
 2. 在 `override.yaml` 中设置 `external-controller`、`secret`、`external-ui: ui`
-3. 管理页顶部的「metacubexd」链接会自动用当前主机名 + controller 端口 + secret 打开 `http://<host>:<port>/ui/`
+3. 设置 `MANAGER_DASHBOARD_URL`，管理页顶部才会出现面板跳转链接（默认不显示）。地址支持占位符 `{host}`（浏览器访问管理页用的主机名）、`{port}`（controller 端口）、`{secret}`（controller secret），替换时会做 URL 编码，例如：
+
+   ```bash
+   # 本机 mihomo 托管的 metacubexd，自动填好连接信息
+   MANAGER_DASHBOARD_URL='http://{host}:{port}/ui/#/setup?hostname={host}&port={port}&secret={secret}'
+   # 或者直接用公共托管的面板 / 自建地址
+   MANAGER_DASHBOARD_URL='https://dash.example.com/'
+   MANAGER_DASHBOARD_NAME=metacubexd
+   ```
+
+   注意：模板中含 `{secret}` 时，secret 会下发给已登录管理页的浏览器。
 
 ## 配置
 
@@ -166,6 +176,8 @@ MIHOMO_DIR=/tmp/mk MANAGER_LISTEN=127.0.0.1:9092 MANAGER_PASSWORD=test python3 m
 | `MERGE_SCRIPT` | 与 manager.py 同目录的 `merge-config.py` | 合并脚本路径 |
 | `UPDATE_SCRIPT` | 与 manager.py 同目录的 `update-subscription.sh` | 订阅更新脚本路径 |
 | `BACKUP_KEEP` | `20` | `update-subscription.sh` 保留的 config.yaml 备份数 |
+| `MANAGER_DASHBOARD_URL` | 空 | 外部面板跳转地址模板，支持 `{host}` / `{port}` / `{secret}`；为空时不显示跳转链接 |
+| `MANAGER_DASHBOARD_NAME` | `面板` | 跳转链接显示的名称 |
 
 mihomo 的 controller 地址和 secret 直接从 `config.yaml` 的 `external-controller` / `secret` 读取，无需另配。
 
