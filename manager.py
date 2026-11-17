@@ -49,6 +49,10 @@ SUB_URL_FILE = Path(os.environ.get("MIHOMO_SUB_URL_FILE", str(MIHOMO_DIR / "subs
 LISTEN = os.environ.get("MANAGER_LISTEN", "0.0.0.0:9092")
 AUTH_USER = os.environ.get("MANAGER_USER", "admin")
 SERVICE = os.environ.get("MIHOMO_SERVICE", "mihomo")
+# 外部面板（metacubexd / zashboard 等）跳转地址模板，留空则不显示跳转链接。
+# 支持占位符：{host} 浏览器访问管理页用的主机名，{port} controller 端口，{secret} controller secret（均已 URL 编码）
+DASHBOARD_URL = os.environ.get("MANAGER_DASHBOARD_URL", "").strip()
+DASHBOARD_NAME = os.environ.get("MANAGER_DASHBOARD_NAME", "").strip() or "面板"
 
 LOCK = threading.Lock()  # 串行化所有写操作
 
@@ -188,7 +192,13 @@ def api_status():
     base, secret = cfg_meta()
     return {
         "service": svc,
-        "dashboard": {"port": base.rsplit(":", 1)[1] if base else None, "secret": secret},
+        "dashboard": {
+            "url": DASHBOARD_URL,
+            "name": DASHBOARD_NAME,
+            "port": base.rsplit(":", 1)[1] if base else "",
+            # 只有模板里用到 {secret} 时才下发
+            "secret": secret if "{secret}" in DASHBOARD_URL else "",
+        } if DASHBOARD_URL else None,
         "version": version,
         "controller": base,
         "config": file_info(CONFIG_FILE),
@@ -1298,7 +1308,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 </style></head><body>
 <div class="top">
 <header><div class="logo">M</div><h1>mihomo 管理</h1><span class="pill" id="hstate"><span class="dot"></span>…</span><span class="sp"></span>
-<a id="dash" class="ext" href="#" target="_blank" onclick="if(this.getAttribute('href')==='#'){toast('状态尚未加载，请稍候',1);return false}">metacubexd<span class="lg"> 面板</span> ↗</a></header>
+<a id="dash" class="ext" href="#" target="_blank" rel="noopener" style="display:none"></a></header>
 <nav>
 <div class="ng"><button data-t="status" class="on">状态</button></div>
 <div class="ng"><span class="gl">代理</span><button data-t="rules">规则</button><button data-t="proxies">策略组</button></div>
@@ -1377,7 +1387,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 </section>
 <section class="tab" id="t-proxies">
  <div class="card">
-  <div class="card-h"><h2>策略组</h2><span class="d">Selector 可手动切换；URLTest / Fallback 为自动选择。测速请用 metacubexd。</span><span class="sp"></span><button class="btn sm" onclick="loadProxies()">↻ 刷新</button></div>
+  <div class="card-h"><h2>策略组</h2><span class="d">Selector 可手动切换；URLTest / Fallback 为自动选择。测速请用外部面板（如 metacubexd）。</span><span class="sp"></span><button class="btn sm" onclick="loadProxies()">↻ 刷新</button></div>
   <div class="pgs" id="px"></div>
  </div>
 </section>
@@ -1453,7 +1463,7 @@ window.addEventListener('resize',stickTop);
 /* ---------- status ---------- */
 async function loadStatus(){try{const s=await api('/api/status');const sv=s.service||{};const act=sv.ActiveState==='active';
  $('#hstate').innerHTML=`<span class="dot ${act?'ok live':'bad'}"></span>${act?'运行中':esc(sv.ActiveState||'未知')}`;
- if(s.dashboard?.port){const h=location.hostname,p=s.dashboard.port;$('#dash').href=`http://${h}:${p}/ui/#/setup?hostname=${encodeURIComponent(h)}&port=${p}`+(s.dashboard.secret?`&secret=${encodeURIComponent(s.dashboard.secret)}`:'')}
+ {const d=s.dashboard,a=$('#dash');if(d?.url){const v={host:location.hostname,port:d.port||'',secret:d.secret||''};a.href=d.url.replace(/\{(host|port|secret)\}/g,(_,k)=>encodeURIComponent(v[k]));a.textContent=`${d.name} ↗`;a.style.display=''}else a.style.display='none'}
  const ver=s.version?.version,since=parseTs(sv.ActiveEnterTimestamp),now=parseTs(s.now)||new Date();
  $('#h-big').className='big '+(act?'ok':'bad');$('#h-t').textContent=act?'mihomo 运行中':`mihomo ${sv.ActiveState||'未知'} (${sv.SubState||'-'})`;
  $('#h-s').textContent=[ver?(/^v/i.test(ver)?ver:`v${ver}`):(s.version?.error?'controller 不可达':''),act&&sv.MainPID?`PID ${sv.MainPID}`:'',act&&since?`已运行 ${fmtDur(now-since)}`:'',`重启 ${sv.NRestarts??0} 次`].filter(Boolean).join(' · ');

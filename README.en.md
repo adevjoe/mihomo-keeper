@@ -11,7 +11,7 @@ A lightweight web console for operating [mihomo](https://github.com/MetaCubeX/mi
 
 ## Features
 
-- **Status**: service state, kernel version, config/override mtime, backup count, masked subscription URL; update subscription, hot reload / restart / validate config; link to the metacubexd dashboard
+- **Status**: service state, kernel version, config/override mtime, backup count, masked subscription URL; update subscription, hot reload / restart / validate config; optional link to an external dashboard such as metacubexd (`MANAGER_DASHBOARD_URL`)
 - **Rules**: form editor for `rules-prepend` / `rules-append` in `override.yaml`, with validation; only the relevant YAML block is rewritten so comments are kept
 - **Proxy groups**: view and switch selectors via the mihomo external controller
 - **override**: edit `override.yaml`; "validate" downloads the subscription, merges, runs `mihomo -t` and shows a diff against the current `config.yaml` without writing anything
@@ -46,7 +46,11 @@ On an existing manual deployment, create `/etc/mihomo/manager.token` with a rand
 ## Configuration
 
 Environment variables, typically in `/etc/default/mihomo-manager` (see [`deploy/manager.env.example`](deploy/manager.env.example)):
-`MIHOMO_DIR`, `MIHOMO_BIN`, `MIHOMO_SERVICE`, `MANAGER_LISTEN` (default `0.0.0.0:9092`), `MANAGER_USER`, `MANAGER_PASSWORD`, `MANAGER_SECRET_FILE`, `MIHOMO_SUB_URL`, `MIHOMO_SUB_URL_FILE`, `MERGE_SCRIPT`, `UPDATE_SCRIPT`, `BACKUP_KEEP`.
+`MIHOMO_DIR`, `MIHOMO_BIN`, `MIHOMO_SERVICE`, `MANAGER_LISTEN` (default `0.0.0.0:9092`), `MANAGER_USER`, `MANAGER_PASSWORD`, `MANAGER_SECRET_FILE`, `MIHOMO_SUB_URL`, `MIHOMO_SUB_URL_FILE`, `MERGE_SCRIPT`, `UPDATE_SCRIPT`, `BACKUP_KEEP`, `MANAGER_DASHBOARD_URL`, `MANAGER_DASHBOARD_NAME`.
+
+The dashboard link in the header is hidden unless `MANAGER_DASHBOARD_URL` is set. It is a template supporting `{host}` (hostname used by the browser), `{port}` (controller port) and `{secret}` (controller secret), all URL-encoded, e.g.
+`MANAGER_DASHBOARD_URL='http://{host}:{port}/ui/#/setup?hostname={host}&port={port}&secret={secret}'`.
+If the template contains `{secret}`, the secret is sent to the (authenticated) browser.
 
 Token settings: `MANAGER_TOKEN` (takes precedence over the file), `MANAGER_TOKEN_FILE` (default `$MIHOMO_DIR/manager.token`), `MANAGER_SESSION_MAX_AGE` (positive seconds, default `604800`, or seven days).
 
