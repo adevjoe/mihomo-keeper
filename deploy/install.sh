@@ -8,10 +8,10 @@
 #   MIHOMO_BIN      mihomo binary    (default /usr/local/bin/mihomo)
 #   MIHOMO_SUB_URL  if set and $MIHOMO_DIR/subscription.url does not exist, it is written there (chmod 600)
 #
-# What it does (idempotent, never overwrites your config/override/secret):
+# What it does (idempotent, never overwrites your config/override/secret/token):
 #   1. copies manager.py / merge-config.py / update-subscription.sh into $MIHOMO_DIR
 #   2. creates override.yaml from override.example.yaml if missing
-#   3. creates manager.secret with a random password if missing (printed once)
+#   3. creates manager.secret / manager.token with random credentials if missing (printed once)
 #   4. installs /etc/default/mihomo-manager from manager.env.example if missing
 #   5. installs systemd units (mihomo.service only if it does not exist yet, unless --force-units)
 #   6. enables + starts mihomo-manager.service (skip with --no-start);
@@ -72,6 +72,12 @@ if [ ! -e "$MIHOMO_DIR/manager.secret" ]; then
   ( umask 077; printf '%s\n' "$NEW_PASSWORD" > "$MIHOMO_DIR/manager.secret" )
 fi
 
+NEW_TOKEN=''
+if [ ! -e "$MIHOMO_DIR/manager.token" ]; then
+  NEW_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+  ( umask 077; printf '%s\n' "$NEW_TOKEN" > "$MIHOMO_DIR/manager.token" )
+fi
+
 if [ ! -e "$ENV_FILE" ]; then
   say "install $ENV_FILE"
   install -m 600 "$REPO_DIR/deploy/manager.env.example" "$ENV_FILE"
@@ -110,5 +116,9 @@ say "done."
 if [ -n "$NEW_PASSWORD" ]; then
   echo "    web manager user: admin"
   echo "    web manager password (saved in $MIHOMO_DIR/manager.secret): $NEW_PASSWORD"
+fi
+if [ -n "$NEW_TOKEN" ]; then
+  echo "    web manager token (saved in $MIHOMO_DIR/manager.token): $NEW_TOKEN"
+  echo "    auto-login: http://<server>:9092/login#token=<token>"
 fi
 echo "    listen address: see MANAGER_LISTEN in $ENV_FILE (default 0.0.0.0:9092)"

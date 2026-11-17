@@ -6,6 +6,7 @@ override.yaml.*
 !override.example.yaml
 subscription.url
 manager.secret
+manager.token
 *.secret
 *.env
 !deploy/manager.env.example

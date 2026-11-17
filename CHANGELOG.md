@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Dedicated manager tokens for browser auto-login links and Bearer API authentication, alongside existing HTTP Basic authentication.
+- Signed HttpOnly / SameSite=Strict sessions (seven days by default), logout, token rotation, and query redaction in access logs.
+- Installer-generated `manager.token`, environment settings, authentication integration tests, and Chinese / English documentation.
 ### Changed
 
 - 外部面板跳转地址改为可配置：新增 `MANAGER_DASHBOARD_URL`（支持 `{host}` / `{port}` / `{secret}` 占位符）和 `MANAGER_DASHBOARD_NAME`。

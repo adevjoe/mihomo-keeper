@@ -31,7 +31,17 @@ git clone https://github.com/adevjoe/mihomo-keeper.git && cd mihomo-keeper
 sudo MIHOMO_SUB_URL='https://your-subscription-link' ./deploy/install.sh [--enable-timer] [--no-start]
 ```
 
-The installer copies the scripts to `/etc/mihomo`, creates `override.yaml`, `subscription.url` and a random `manager.secret` (printed once) if they do not exist, installs the systemd units and starts `mihomo-manager.service`. Then open `http://<server>:9092` (user `admin`).
+The installer copies the scripts to `/etc/mihomo`, creates `override.yaml`, `subscription.url`, a random `manager.secret` and an independent `manager.token` (credentials printed once) if they do not exist, installs the systemd units and starts `mihomo-manager.service`. Then open `http://<server>:9092` (user `admin`).
+
+## Token auto-login
+
+Open `http://<server>:9092/login#token=<token>` using the value in `/etc/mihomo/manager.token`. The login page removes the fragment from the address bar, submits the token as JSON and opens the console with an HttpOnly, SameSite=Strict session cookie. Sessions last seven days by default and survive service restarts. The fragment is never sent in the page request.
+
+`http://<server>:9092/?token=<token>` also works: the server sets the session cookie and immediately redirects to `/`. Query strings are redacted in manager access logs. Prefer fragment links to keep tokens out of reverse proxy logs.
+
+APIs accept `Authorization: Bearer <token>`. Existing HTTP Basic authentication remains available. `POST /api/auth/logout` with a JSON body of `{}` clears the session cookie; it does not clear cached Basic credentials.
+
+On an existing manual deployment, create `/etc/mihomo/manager.token` with a random value (`secrets.token_urlsafe(32)`), set permissions to `600` and restart `mihomo-manager.service`. The token is independent of both the password and the mihomo controller secret. Replacing it and restarting the manager revokes all previous tokens and sessions. If `MANAGER_TOKEN` is set, rotate that environment variable instead. Treat auto-login links as passwords.
 
 ## Configuration
 
@@ -42,11 +52,13 @@ The dashboard link in the header is hidden unless `MANAGER_DASHBOARD_URL` is set
 `MANAGER_DASHBOARD_URL='http://{host}:{port}/ui/#/setup?hostname={host}&port={port}&secret={secret}'`.
 If the template contains `{secret}`, the secret is sent to the (authenticated) browser.
 
+Token settings: `MANAGER_TOKEN` (takes precedence over the file), `MANAGER_TOKEN_FILE` (default `$MIHOMO_DIR/manager.token`), `MANAGER_SESSION_MAX_AGE` (positive seconds, default `604800`, or seven days).
+
 ## Security
 
-- It listens on `0.0.0.0:9092` by default and runs as root (it can rewrite configs, restart services and replace the mihomo binary). **Always set a strong password**; without one it runs **without authentication**.
+- It listens on `0.0.0.0:9092` by default and runs as root (it can rewrite configs, restart services and replace the mihomo binary). **Always set a strong password or token**; without either it runs **without authentication**.
 - HTTP Basic auth is not encrypted. Use it only on a trusted LAN, or bind to `127.0.0.1` and put it behind a TLS reverse proxy / VPN. Never expose it directly to the Internet.
-- Keep `subscription.url`, `manager.secret`, `override.yaml`, `config.yaml` and `backup/` private.
+- Keep `subscription.url`, `manager.secret`, `manager.token`, `override.yaml`, `config.yaml` and `backup/` private.
 
 ## License
 
