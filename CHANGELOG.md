@@ -7,8 +7,13 @@
 - Dedicated manager tokens for browser auto-login links and Bearer API authentication, alongside existing HTTP Basic authentication.
 - Signed HttpOnly / SameSite=Strict sessions (seven days by default), logout, token rotation, and query redaction in access logs.
 - Installer-generated `manager.token`, environment settings, authentication integration tests, and Chinese / English documentation.
+- `tests/test_update_subscription.py`：用桩 `systemctl` / `mihomo` 和本地假 controller 覆盖 `update-subscription.sh` 的生效路径（热重载、回退重启、`restart` 模式、服务未运行、无 secret、配置未变、非法 `MIHOMO_APPLY_MODE`）。
 ### Changed
 
+- **`update-subscription.sh` 默认改为热重载生效，不再重启 mihomo**：新配置通过 controller 的 `PUT /configs?force=false` 原地加载。
+  开了 `tun` 的机器上，`systemctl restart` 会销毁重建 tun 设备，`tun.auto-route` 的路由/策略规则随之重建，同机的其它隧道会把这当成链路变化 —— Tailscale 会 `LinkChange: major, rebinding` 并重置所有 peer 路径，正在经它转发的 exit node / subnet router 连接随之断开；订阅每小时自动更新就等于每小时断一次。
+  热重载失败（controller 不可达、服务未运行等）自动回退 `systemctl restart`，并在日志中写明本次由 `reload` 还是 `restart` 生效。新增 `MIHOMO_APPLY_MODE`（`reload` / `restart`，默认 `reload`）可恢复旧行为。
+  同时把脚本末尾读取 controller 地址与 secret 的那段内联 Python 提取为 `read_controller_meta`，复用于热重载和 `/version` 检查。
 - 外部面板跳转地址改为可配置：新增 `MANAGER_DASHBOARD_URL`（支持 `{host}` / `{port}` / `{secret}` 占位符）和 `MANAGER_DASHBOARD_NAME`。
   **去掉了默认的 metacubexd 跳转**（原来固定为 `http://<host>:<controller 端口>/ui/`）：未配置时顶部不再显示面板链接；`/api/status` 也只在模板使用 `{secret}` 时才返回 controller secret。
 

@@ -46,7 +46,15 @@ On an existing manual deployment, create `/etc/mihomo/manager.token` with a rand
 ## Configuration
 
 Environment variables, typically in `/etc/default/mihomo-manager` (see [`deploy/manager.env.example`](deploy/manager.env.example)):
-`MIHOMO_DIR`, `MIHOMO_BIN`, `MIHOMO_SERVICE`, `MANAGER_LISTEN` (default `0.0.0.0:9092`), `MANAGER_USER`, `MANAGER_PASSWORD`, `MANAGER_SECRET_FILE`, `MIHOMO_SUB_URL`, `MIHOMO_SUB_URL_FILE`, `MERGE_SCRIPT`, `UPDATE_SCRIPT`, `BACKUP_KEEP`, `MANAGER_DASHBOARD_URL`, `MANAGER_DASHBOARD_NAME`.
+`MIHOMO_DIR`, `MIHOMO_BIN`, `MIHOMO_SERVICE`, `MANAGER_LISTEN` (default `0.0.0.0:9092`), `MANAGER_USER`, `MANAGER_PASSWORD`, `MANAGER_SECRET_FILE`, `MIHOMO_SUB_URL`, `MIHOMO_SUB_URL_FILE`, `MERGE_SCRIPT`, `UPDATE_SCRIPT`, `BACKUP_KEEP`, `MIHOMO_APPLY_MODE`, `MANAGER_DASHBOARD_URL`, `MANAGER_DASHBOARD_NAME`.
+
+### How a subscription update is applied (`MIHOMO_APPLY_MODE`)
+
+Default `reload`: after the new `config.yaml` is validated and put in place, `update-subscription.sh` asks the running mihomo to load it through `PUT /configs?force=false` instead of restarting the process.
+
+This matters on hosts that run `tun`. `systemctl restart` destroys and recreates the tun device, so the routes and policy rules installed by `tun.auto-route` are rebuilt, and other tunnels on the same host see that as a link change. Tailscale, for instance, logs `LinkChange: major, rebinding` and resets every peer path, dropping the connections it was forwarding (exit node / subnet router) — with hourly subscription updates that is an hourly outage. A hot reload leaves the tun device alone.
+
+If the reload cannot be done (controller unreachable, service not running, …) the script falls back to `systemctl restart`, and logs which of the two actually applied the config. Set `MIHOMO_APPLY_MODE=restart` to keep the previous behaviour.
 
 The dashboard link in the header is hidden unless `MANAGER_DASHBOARD_URL` is set. It is a template supporting `{host}` (hostname used by the browser), `{port}` (controller port) and `{secret}` (controller secret), all URL-encoded, e.g.
 `MANAGER_DASHBOARD_URL='http://{host}:{port}/ui/#/setup?hostname={host}&port={port}&secret={secret}'`.
