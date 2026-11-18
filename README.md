@@ -204,10 +204,19 @@ Token 和自动登录链接都拥有管理页的完整权限，请像密码一�
 | `MERGE_SCRIPT` | 与 manager.py 同目录的 `merge-config.py` | 合并脚本路径 |
 | `UPDATE_SCRIPT` | 与 manager.py 同目录的 `update-subscription.sh` | 订阅更新脚本路径 |
 | `BACKUP_KEEP` | `20` | `update-subscription.sh` 保留的 config.yaml 备份数 |
+| `MIHOMO_APPLY_MODE` | `reload` | `update-subscription.sh` 应用新配置的方式：`reload` 走 controller 热重载（失败自动回退重启），`restart` 总是 `systemctl restart` |
 | `MANAGER_DASHBOARD_URL` | 空 | 外部面板跳转地址模板，支持 `{host}` / `{port}` / `{secret}`；为空时不显示跳转链接 |
 | `MANAGER_DASHBOARD_NAME` | `面板` | 跳转链接显示的名称 |
 
 mihomo 的 controller 地址和 secret 直接从 `config.yaml` 的 `external-controller` / `secret` 读取，无需另配。
+
+### 订阅更新如何生效（MIHOMO_APPLY_MODE）
+
+默认 `reload`：校验并替换 `config.yaml` 后，通过 `PUT /configs?force=false` 让正在运行的 mihomo 原地加载新配置，不重启进程。
+
+这对开了 `tun` 的机器很重要。`systemctl restart` 会销毁并重建 tun 设备，`tun.auto-route` 装的路由和策略规则随之重建；同一台机器上的其它隧道会把这当成链路变化。以 Tailscale 为例，它会记一次 `LinkChange: major, rebinding` 并重置所有 peer 路径，正在经过它转发的连接（exit node / subnet router）会断掉 —— 订阅每小时自动更新一次，就等于每小时断一次。热重载不动 tun 设备，这个问题就不存在。
+
+热重载失败（controller 不可达、服务没在跑等）会自动回退到 `systemctl restart`，日志里会写明本次是 `reload` 还是 `restart` 生效的。需要保持旧行为就设 `MIHOMO_APPLY_MODE=restart`。
 
 ## 安全提示
 

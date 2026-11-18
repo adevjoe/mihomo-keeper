@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download the mihomo subscription, merge override.yaml into it, validate with `mihomo -t`,
-# back up the old config.yaml, replace it and restart the mihomo service.
+# back up the old config.yaml, replace it and apply it to the running mihomo.
 #
 # All settings come from environment variables (see README.md "配置"):
 #   MIHOMO_SUB_URL        subscription URL (highest priority)
@@ -10,6 +10,10 @@
 #   MIHOMO_SERVICE        systemd unit name of mihomo           (default: mihomo)
 #   MERGE_SCRIPT          path to merge-config.py               (default: next to this script)
 #   BACKUP_KEEP           number of config.yaml backups to keep (default: 20)
+#   MIHOMO_APPLY_MODE     how to apply the new config:          (default: reload)
+#                           reload  - hot reload through the external controller,
+#                                     fall back to a restart if that fails
+#                           restart - always `systemctl restart`
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,8 +26,17 @@ OVERRIDE_FILE="${MIHOMO_DIR}/override.yaml"
 MERGE_SCRIPT="${MERGE_SCRIPT:-${SCRIPT_DIR}/merge-config.py}"
 BACKUP_DIR="${MIHOMO_DIR}/backup"
 BACKUP_KEEP="${BACKUP_KEEP:-20}"
+MIHOMO_APPLY_MODE="${MIHOMO_APPLY_MODE:-reload}"
 TMP_SUB_FILE="${MIHOMO_DIR}/config.yaml.sub.tmp"
 TMP_CONFIG_FILE="${MIHOMO_DIR}/config.yaml.tmp"
+
+case "$MIHOMO_APPLY_MODE" in
+  reload | restart) ;;
+  *)
+    printf 'MIHOMO_APPLY_MODE must be "reload" or "restart", got %s\n' "$MIHOMO_APPLY_MODE" >&2
+    exit 1
+    ;;
+esac
 
 if [ -t 1 ] && [ "${TERM:-dumb}" != 'dumb' ] && [ -z "${NO_COLOR:-}" ]; then
   COLOR_BLUE='\033[1;34m'
@@ -47,6 +60,39 @@ log_success() {
 
 log_error() {
   printf '%b[%s] %s%b\n' "$COLOR_RED" "$(date '+%F %T')" "$*" "$COLOR_RESET" >&2
+}
+
+# Read the external-controller endpoint out of config.yaml.
+# Prints two lines: the controller base URL, then the secret (may be empty).
+read_controller_meta() {
+  python3 - "$1" <<'PY'
+import sys
+import yaml
+
+cfg = yaml.safe_load(open(sys.argv[1], encoding='utf-8')) or {}
+external_controller = str(cfg.get('external-controller') or '127.0.0.1:9090')
+secret = str(cfg.get('secret') or '')
+
+host, port = external_controller.rsplit(':', 1)
+if host in ('0.0.0.0', '*', '::', '[::]'):
+    host = '127.0.0.1'
+print(f'http://{host}:{port}')
+print(secret)
+PY
+}
+
+# Ask the running mihomo to load CONFIG_FILE in place.
+#
+# A hot reload keeps the existing tun device, so the routes and policy rules that
+# tun.auto-route installed stay in place. `systemctl restart` tears the tun device
+# down and recreates it, which other tunnels on the same host observe as a link
+# change -- Tailscale, for example, rebinds its socket and resets every peer path,
+# dropping connections that were being forwarded (exit node / subnet router).
+reload_config() {
+  curl -fsS -X PUT ${CONTROLLER_AUTH[@]+"${CONTROLLER_AUTH[@]}"} \
+    -H 'Content-Type: application/json' \
+    --data "$(printf '{"path":"%s"}' "$CONFIG_FILE")" \
+    "${CONTROLLER_BASE}/configs?force=false" >/dev/null
 }
 
 # resolve subscription URL: env > file
@@ -85,7 +131,7 @@ log_step 'validate merged config with mihomo -t'
 "$MIHOMO_BIN" -t -d "$MIHOMO_DIR" -f "$TMP_CONFIG_FILE" >/dev/null
 
 if [ -f "$CONFIG_FILE" ] && cmp -s "$TMP_CONFIG_FILE" "$CONFIG_FILE"; then
-  log_success 'config unchanged, skip restart'
+  log_success 'config unchanged, nothing to apply'
   exit 0
 fi
 
@@ -102,8 +148,30 @@ fi
 log_step "replace ${CONFIG_FILE}"
 mv "$TMP_CONFIG_FILE" "$CONFIG_FILE"
 
-log_step "restart ${MIHOMO_SERVICE} service"
-systemctl restart "$MIHOMO_SERVICE"
+mapfile -t controller_meta < <(read_controller_meta "$CONFIG_FILE")
+CONTROLLER_BASE="${controller_meta[0]}"
+CONTROLLER_SECRET="${controller_meta[1]:-}"
+CONTROLLER_AUTH=()
+if [ -n "$CONTROLLER_SECRET" ]; then
+  CONTROLLER_AUTH=(-H "Authorization: Bearer ${CONTROLLER_SECRET}")
+fi
+
+APPLIED_BY=''
+if [ "$MIHOMO_APPLY_MODE" = 'reload' ] && systemctl is-active --quiet "$MIHOMO_SERVICE"; then
+  log_step "hot reload ${MIHOMO_SERVICE} via ${CONTROLLER_BASE}/configs"
+  if reload_config; then
+    APPLIED_BY='reload'
+    log_success 'config hot-reloaded, tun device and routes preserved'
+  else
+    log_step 'hot reload failed, falling back to a restart'
+  fi
+fi
+
+if [ -z "$APPLIED_BY" ]; then
+  log_step "restart ${MIHOMO_SERVICE} service"
+  systemctl restart "$MIHOMO_SERVICE"
+  APPLIED_BY='restart'
+fi
 
 log_step "check ${MIHOMO_SERVICE} service status"
 if systemctl is-active --quiet "$MIHOMO_SERVICE"; then
@@ -115,28 +183,8 @@ else
 fi
 
 log_step 'check mihomo controller /version'
-mapfile -t controller_meta < <(python3 - "$CONFIG_FILE" <<'PY'
-import sys
-import yaml
-
-cfg = yaml.safe_load(open(sys.argv[1], encoding='utf-8')) or {}
-external_controller = str(cfg.get('external-controller') or '127.0.0.1:9090')
-secret = str(cfg.get('secret') or '')
-
-host, port = external_controller.rsplit(':', 1)
-if host in ('0.0.0.0', '*', '::', '[::]'):
-    host = '127.0.0.1'
-print(f'http://{host}:{port}/version')
-print(secret)
-PY
-)
-CONTROLLER_URL="${controller_meta[0]}"
-CONTROLLER_SECRET="${controller_meta[1]:-}"
-if [ -n "$CONTROLLER_SECRET" ]; then
-  VERSION_JSON="$(curl -fsS -H "Authorization: Bearer ${CONTROLLER_SECRET}" "$CONTROLLER_URL")"
-else
-  VERSION_JSON="$(curl -fsS "$CONTROLLER_URL")"
-fi
+VERSION_JSON="$(curl -fsS ${CONTROLLER_AUTH[@]+"${CONTROLLER_AUTH[@]}"} "${CONTROLLER_BASE}/version")"
 log_success "mihomo controller /version: ${VERSION_JSON}"
+log_success "new config applied by: ${APPLIED_BY}"
 
 log_success 'mihomo subscription update finished'
