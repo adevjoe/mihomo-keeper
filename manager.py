@@ -1468,21 +1468,33 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 .chart-h i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
 .chart canvas{width:100%;height:150px;display:block}
 /* proxies */
-.pxg{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;align-items:start}
-.pgc{background:var(--ink);border:1px solid var(--bd);border-top:3px solid var(--bd2);border-radius:8px;min-width:0}
-.pgc.Selector{border-top-color:var(--acc)}.pgc.URLTest{border-top-color:var(--cyan)}.pgc.Fallback{border-top-color:var(--warn)}.pgc.LoadBalance{border-top-color:var(--pur)}
-.pgc.open{grid-column:1/-1}
-.pgc-h{display:flex;align-items:center;gap:8px;padding:9px 12px 3px;cursor:pointer;user-select:none;min-width:0}
-.pgc-h b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.pgc-h .chev{color:var(--mut);transition:transform .15s;display:inline-block;width:10px;flex:none}.pgc.open .chev{transform:rotate(90deg)}
-.pgc-now{display:flex;align-items:center;gap:6px;padding:0 12px 8px 30px;font-size:12.5px;color:var(--mut);min-width:0;cursor:pointer}
-.pgc-now .nm{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.dots{display:flex;flex-wrap:wrap;gap:4px;padding:0 12px 11px 30px;cursor:pointer}.dots i{width:8px;height:8px;border-radius:50%;background:var(--bd2)}
-.dots i.g{background:var(--ok)}.dots i.y{background:var(--warn)}.dots i.r{background:var(--bad)}.dots i.on{box-shadow:0 0 0 2px var(--ink),0 0 0 3px var(--fg)}
-.nds{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;padding:4px 12px 12px}
+.pxg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.pgc{background:var(--ink);border:1px solid var(--bd);border-radius:10px;min-width:0;transition:border-color .15s}.pgc:hover{border-color:var(--bd2)}
+.pgc-h{display:flex;align-items:center;gap:10px;padding:12px 12px 0 14px;cursor:pointer;user-select:none;min-width:0}
+.gic{position:relative;width:24px;height:24px;flex:none;display:grid;place-items:center}.gic img{width:100%;height:100%;object-fit:contain;display:block}
+.gic .av{width:100%;height:100%;border-radius:7px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--acc),var(--pur))}
+.gic.sm{width:16px;height:16px}.gic.sm .av{border-radius:4px;font-size:9px}
+.pgc-h b{font-size:15px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pgc-h .cnt{flex:none;font:600 10.5px var(--mono);color:var(--mut);border:1px solid var(--bd2);border-radius:5px;padding:0 5px;line-height:16px}
+.pgc-t{flex:none;width:32px;height:32px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--mut);display:grid;place-items:center;cursor:pointer;padding:0}
+.pgc-t:hover{color:var(--fg);border-color:var(--bd2)}.pgc-t .spin{margin:0}
+.pgc-b{display:flex;align-items:center;gap:10px;padding:9px 12px 0 14px;cursor:pointer;min-width:0}
+.pgc-tags{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0;flex:1}
+.gpill{display:inline-flex;align-items:center;gap:6px;max-width:100%;font-size:11.5px;font-weight:600;line-height:20px;padding:0 8px;border-radius:6px;white-space:nowrap;overflow:hidden;background:#262c37;color:var(--fg)}
+.gpill .nm{overflow:hidden;text-overflow:ellipsis;min-width:0}.gpill i{font-style:normal;opacity:.6;font-weight:400}
+.gpill.Selector{background:rgba(88,166,255,.16);color:#79b8ff}.gpill.URLTest{background:rgba(57,197,207,.15);color:var(--cyan)}.gpill.Fallback{background:rgba(210,153,34,.16);color:#e3b341}.gpill.LoadBalance{background:rgba(163,113,247,.16);color:#bc8cff}
+.gpill.spd{background:rgba(247,120,186,.13);color:var(--pink);font:500 11px/20px var(--mono)}.gpill.spd.idle{background:#1b2029;color:var(--mut)}
+.pgc-b .chev{color:var(--mut);flex:none;transition:transform .15s;width:16px;height:16px}.pgc.open .chev{transform:rotate(180deg)}
+.pgc-f{display:flex;align-items:center;gap:12px;padding:10px 14px 13px;cursor:pointer;min-width:0}
+.pgc-f .latv{font-size:11.5px;min-width:30px;text-align:right}
+.dots{display:flex;flex-wrap:wrap;gap:5px;flex:1;min-width:0}.dots i{width:12px;height:12px;border-radius:50%;background:var(--bd2);--c:var(--bd2)}
+.dots i.g{background:var(--ok);--c:var(--ok)}.dots i.y{background:var(--warn);--c:var(--warn)}.dots i.r{background:var(--bad);--c:var(--bad)}.dots i.on{background:#fff;box-shadow:inset 0 0 0 3px var(--c)}
+.lbar{flex:1;display:flex;height:6px;border-radius:3px;overflow:hidden;background:#262c37;min-width:0}.lbar i{height:100%}.lbar .g{background:var(--ok)}.lbar .y{background:var(--warn)}.lbar .r{background:var(--bad)}
+.pgc .nds{border-top:1px solid var(--bd);padding:10px 12px 12px}
+.nds{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}
 .nd{background:var(--card);border:1px solid var(--bd);border-radius:7px;padding:7px 9px;min-width:0;transition:border-color .12s,background .12s}
 .nd.sel{cursor:pointer}.nd.sel:hover{border-color:var(--bd2);background:var(--card2)}.nd.on{border-color:var(--acc);background:rgba(88,166,255,.09)}
-.nd-n{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nd-n{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:5px}.nd-n span{overflow:hidden;text-overflow:ellipsis}
 .nd-m{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:10.5px;color:var(--mut);min-width:0}
 .nd-m .u{border:1px solid var(--bd);border-radius:4px;padding:0 4px;line-height:14px}.nd-m .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .lat,.latv{background:none;border:0;padding:0 2px;font:600 11.5px var(--mono);color:var(--mut);white-space:nowrap;flex:none}.lat{cursor:pointer}.lat:hover{text-decoration:underline}
@@ -1568,7 +1580,12 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
  header .spd{display:none}
  .charts{grid-template-columns:1fr}.chart canvas{height:130px}
  .seg button{padding:6px 12px;font-size:13.5px}.toolbar .seg{flex:1 1 100%}.toolbar .seg button{flex:1}
- .pxg{grid-template-columns:1fr}.nds{grid-template-columns:1fr 1fr;padding:4px 8px 10px}.pgc-now,.dots{padding-left:12px}
+ .pxg{grid-template-columns:1fr}.pgc .nds{grid-template-columns:1fr 1fr;padding:8px}.dots i{width:13px;height:13px}
+ #t-proxies .card{padding:10px 0 12px;background:none;border:0}
+ #t-proxies .toolbar{position:static;padding:0 0 8px;background:none;gap:8px}
+ #t-proxies .toolbar .seg{flex:1 1 calc(50% - 4px)}#t-proxies .toolbar .seg button{padding:6px 8px}
+ #t-proxies .toolbar select{flex:1 1 120px;min-width:0;min-height:36px;font-size:14px}#t-proxies .toolbar .switch{min-height:36px;flex:none}#t-proxies .toolbar .sp{display:none}
+ #t-proxies .toolbar .btn{flex:1 1 28%;min-height:36px;font-size:13px;padding:5px 8px}
  input[type=number]{font-size:16px;min-height:40px}
  #t-conns .card{padding:10px 0 12px;background:none;border:0}
  #t-conns .toolbar{position:static;padding:0 0 10px;border:0;background:none;gap:8px}
@@ -1678,23 +1695,21 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 <section class="tab" id="t-proxies">
  <div class="card">
   <div class="toolbar">
+   <span class="seg" id="px-view"><button data-v="groups" class="on">代理 <span id="px-ng">0</span></button><button data-v="providers">代理集合 <span id="px-np">0</span></button></span>
    <span class="seg modesw" title="代理模式"></span>
    <span class="search"><input type="search" id="pxq" placeholder="搜索节点 / 策略组" autocomplete="off"></span>
-   <select id="pxsort"><option value="">默认顺序</option><option value="delay">按延迟</option><option value="name">按名称</option></select>
-   <label class="switch"><input type="checkbox" id="pxhide"><i></i>隐藏超时</label>
+   <span class="tbg px-g"><select id="pxsort"><option value="">默认顺序</option><option value="delay">按延迟</option><option value="name">按名称</option></select>
+   <label class="switch"><input type="checkbox" id="pxhide"><i></i>隐藏超时</label></span>
    <span class="sp"></span>
-   <button class="btn" id="px-expand" onclick="pxExpandAll()">全部展开</button>
-   <button class="btn pri" id="px-testall" onclick="pxTestAll()">⚡ 全部测速</button>
+   <span class="tbg px-g"><button class="btn" id="px-expand" onclick="pxExpandAll()">全部展开</button><button class="btn pri" id="px-testall" onclick="pxTestAll()">⚡ 全部测速</button></span>
+   <span class="tbg px-p" style="display:none"><button class="btn pri" onclick="pvUpdateAll(this)">↻ 全部更新</button></span>
    <button class="btn" onclick="loadProxies()">↻ 刷新</button>
   </div>
-  <details style="margin:0 0 10px"><summary>测速与切换设置</summary>
+  <details class="px-g" style="margin:0 0 10px"><summary>测速与切换设置</summary>
    <div class="row"><span class="mut" style="font-size:12px">测速地址</span><input type="text" id="px-url" style="max-width:340px" spellcheck="false"><span class="mut" style="font-size:12px">超时 ms</span><input type="number" id="px-to" min="500" max="30000" step="500" style="width:100px">
     <label class="switch"><input type="checkbox" id="px-autoclose"><i></i>切换节点后断开该组的旧连接</label><button class="btn sm" onclick="pxSaveSet()">保存</button></div></details>
-  <div class="pxg" id="px"><div class="empty">加载中…</div></div>
- </div>
- <div class="card" id="pv-card" style="display:none">
-  <div class="card-h"><h2>代理集合</h2><span class="tag" id="pv-cnt">0</span><span class="d">proxy-providers · 订阅流量、更新与健康检查</span><span class="sp"></span><button class="btn sm" onclick="pvUpdateAll(this)">↻ 全部更新</button></div>
-  <div class="pvs" id="pvs"></div>
+  <div class="pxg px-g" id="px"><div class="empty">加载中…</div></div>
+  <div class="pvs px-p" id="pvs" style="display:none"></div>
  </div>
 </section>
 <section class="tab" id="t-conns">
@@ -1825,7 +1840,7 @@ function stickTop(){const h=document.querySelector('.top').offsetHeight;document
 async function copyText(t,what){try{await navigator.clipboard.writeText(t);toast(`已复制 ${what}`)}catch(e){toast('复制失败: '+e.message,1)}}
 const LOADERS={rules:loadRules,override:loadOverride,backups:loadBackups,update:loadUpdate,proxies:loadProxies,logs:loadLogsTab,config:loadConfig,status:loadStatus,conns:cnStart,rtrules:loadRtRules,settings:loadSettings};
 let CUR='status';
-function showTab(t,push=true){const b=document.querySelector(`nav button[data-t="${t}"]`);if(!b)return;document.querySelectorAll('nav button,.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#t-'+t).classList.add('on');stickTop();if(push)history.replaceState(null,'','#'+t);CUR=t;if(t!=='conns')cnStop();if(t==='status')requestAnimationFrame(liveCharts);LOADERS[t]()}
+function showTab(t,push=true){const b=document.querySelector(`nav button[data-t="${t}"]`);if(!b)return;document.querySelectorAll('nav button,.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#t-'+t).classList.add('on');stickTop();if(push)history.replaceState(null,'','#'+t);CUR=t;if(t!=='conns'&&t!=='proxies')cnStop();if(t==='status')requestAnimationFrame(liveCharts);LOADERS[t]()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 window.addEventListener('hashchange',()=>showTab(location.hash.slice(1),false));
 window.addEventListener('resize',stickTop);
@@ -2011,7 +2026,7 @@ const SELECTABLE=new Set(['Selector','URLTest','Fallback']);
 const PXS={url:localStorage.getItem('px-url')||'https://www.gstatic.com/generate_204',to:+localStorage.getItem('px-to')||5000,autoclose:localStorage.getItem('px-autoclose')==='1',open:new Set(JSON.parse(localStorage.getItem('px-open')||'[]'))};
 let PX={proxies:{},providers:{}};const LAT={},TESTING=new Set();
 function isGroup(p){return !!(p&&Array.isArray(p.all))}
-function lat(n,d=0){if(LAT[n]!==undefined)return LAT[n];const p=PX.proxies[n];if(!p)return undefined;if(isGroup(p)&&p.now&&d<6)return lat(p.now,d+1);
+function lat(n,d=0){if(/^(REJECT|REJECT-DROP|PASS|COMPATIBLE)$/.test(n))return undefined;if(LAT[n]!==undefined)return LAT[n];const p=PX.proxies[n];if(!p)return undefined;if(isGroup(p)&&p.now&&d<6)return lat(p.now,d+1);
  const h=(p.extra&&p.extra[PXS.url]&&p.extra[PXS.url].history)||p.history;return h&&h.length?h[h.length-1].delay:undefined}
 function latCls(d){return d===undefined?'':d<=0?'r':d<300?'g':d<800?'y':'r'}
 function latTxt(d){return d===undefined?'—':d<=0?'超时':d+'ms'}
@@ -2021,15 +2036,30 @@ function pxGroups(){const P=PX.proxies;const order=((P.GLOBAL&&P.GLOBAL.all)||[]
 function pxNodes(g,q){let ns=(g.all||[]).slice();if(q&&!g.name.toLowerCase().includes(q))ns=ns.filter(n=>n.toLowerCase().includes(q));
  if($('#pxhide').checked)ns=ns.filter(n=>n===g.now||lat(n)!==0);
  const s=$('#pxsort').value;if(s==='name')ns.sort((a,b)=>a.localeCompare(b,'zh'));else if(s==='delay'){const k=n=>{const d=lat(n);return d>0?d:d===0?1e9:1e8};ns.sort((a,b)=>k(a)-k(b))}return ns}
+/* 策略组 logo：取 proxy-groups 的 icon；加载失败或未配置时显示首字 */
+function gIcon(p,cls=''){const u=String((p&&p.icon)||''),n=String((p&&p.name)||'?');const av=`<span class="av"${/^(https?:|data:image\/)/i.test(u)?' style="display:none"':''}>${esc(Array.from(n)[0]||'?')}</span>`;
+ return `<span class="gic ${cls}">${av}${/^(https?:|data:image\/)/i.test(u)?`<img src="${attr(u)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.previousElementSibling.style.display='';this.remove()">`:''}</span>`}
+const GAUGE='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>';
+const CHEV='<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
 function ndHtml(g,n){const p=PX.proxies[n]||{},d=lat(n),on=g.now===n,sel=SELECTABLE.has(g.type);
- return `<div class="nd ${on?'on':''} ${sel?'sel':''}" data-n="${attr(n)}" title="${attr(n)}"><div class="nd-n">${esc(n)}</div><div class="nd-m"><span>${esc(p.type||'')}</span>${p.udp?'<span class="u">UDP</span>':''}${isGroup(p)?`<span class="sub">→ ${esc(p.now||'')}</span>`:''}<span class="sp"></span><button class="lat ${latCls(d)}" data-n="${attr(n)}" title="点击测速">${TESTING.has(n)?'<span class="spin"></span>':latTxt(d)}</button></div></div>`}
-function renderProxies(){const q=$('#pxq').value.trim().toLowerCase();const gs=pxGroups();
- const html=gs.map(g=>{const ns=pxNodes(g,q);if(q&&!ns.length&&!g.name.toLowerCase().includes(q))return'';const open=PXS.open.has(g.name)||!!q;const [c,l]=PGT[g.type]||['',g.type];const d=lat(g.now);
-  return `<div class="pgc ${esc(g.type)} ${open?'open':''}" data-g="${attr(g.name)}"><div class="pgc-h" data-act="toggle"><span class="chev">›</span><b title="${attr(g.name)}">${esc(g.name)}</b><span class="tag ${c}">${esc(l)}</span><span class="mut" style="font-size:12px">${(g.all||[]).length}</span><span class="sp"></span><button class="btn sm ghost" data-act="gtest" title="测速此组">${TESTING.has('g:'+g.name)?'<span class="spin" style="margin:0"></span>':'⚡'}</button></div>
-  <div class="pgc-now" data-act="toggle"><span>当前</span><span class="nm">${esc(g.now||'-')}</span><span class="latv ${latCls(d)}">${g.now?latTxt(d):''}</span></div>
-  ${open?`<div class="nds">${ns.map(n=>ndHtml(g,n)).join('')||'<span class="mut" style="font-size:12px">无匹配节点</span>'}</div>`:`<div class="dots" data-act="toggle">${ns.slice(0,160).map(n=>`<i class="${latCls(lat(n))} ${n===g.now?'on':''}" title="${attr(n)} ${latTxt(lat(n))}"></i>`).join('')}</div>`}</div>`}).join('');
- $('#px').innerHTML=html||`<div class="empty">${q?'没有匹配的节点':'没有策略组'}</div>`;
- $('#px-expand').textContent=gs.length&&gs.every(g=>PXS.open.has(g.name))?'全部折叠':'全部展开'}
+ return `<div class="nd ${on?'on':''} ${sel?'sel':''}" data-n="${attr(n)}" title="${attr(n)}"><div class="nd-n">${isGroup(p)?gIcon(p,'sm'):''}<span>${esc(n)}</span></div><div class="nd-m"><span>${esc(p.type||'')}</span>${p.udp?'<span class="u">UDP</span>':''}${isGroup(p)?`<span class="sub">→ ${esc(p.now||'')}</span>`:''}<span class="sp"></span><button class="lat ${latCls(d)}" data-n="${attr(n)}" title="点击测速">${TESTING.has(n)?'<span class="spin"></span>':latTxt(d)}</button></div></div>`}
+function latBar(ns){const c={g:0,y:0,r:0};ns.forEach(n=>{const k=latCls(lat(n));if(k)c[k]++});const t=ns.length||1;
+ return `<span class="lbar" title="${c.g} 个低延迟 · ${c.y} 个中等 · ${c.r} 个超时或高延迟 · ${ns.length-c.g-c.y-c.r} 个未测">${['g','y','r'].map(k=>c[k]?`<i class="${k}" style="width:${(c[k]/t*100).toFixed(2)}%"></i>`:'').join('')}</span>`}
+function renderProxies(){const q=$('#pxq').value.trim().toLowerCase();const gs=pxGroups();$('#px-ng').textContent=gs.length;
+ const html=gs.map(g=>{const ns=pxNodes(g,q);if(q&&!ns.length&&!g.name.toLowerCase().includes(q))return'';const open=PXS.open.has(g.name)||!!q;const [,l]=PGT[g.type]||['',g.type];const d=lat(g.now);
+  return `<div class="pgc ${open?'open':''}" data-g="${attr(g.name)}"><div class="pgc-h" data-act="toggle">${gIcon(g)}<b title="${attr(g.name)}">${esc(g.name)}</b><span class="cnt">${(g.all||[]).length}</span><span class="sp"></span><button class="pgc-t" data-act="gtest" title="测速此组">${TESTING.has('g:'+g.name)?'<span class="spin"></span>':GAUGE}</button></div>
+  <div class="pgc-b" data-act="toggle"><div class="pgc-tags"><span class="gpill ${esc(g.type)}" title="${attr(g.type+' › '+(g.now||''))}">${esc(l)}<i>›</i><span class="nm">${esc(g.now||'-')}</span></span><span class="gpill spd idle" data-spd="${attr(g.name)}">0 B/s</span></div>${CHEV}</div>
+  <div class="pgc-f" data-act="toggle">${ns.length>10?latBar(ns):`<span class="dots">${ns.map(n=>`<i class="${latCls(lat(n))} ${n===g.now?'on':''}" title="${attr(n)} · ${latTxt(lat(n))}"></i>`).join('')}</span>`}<span class="latv ${latCls(d)}">${g.now&&d!==undefined?(d>0?d:'超时'):''}</span></div>
+  ${open?`<div class="nds">${ns.map(n=>ndHtml(g,n)).join('')||'<span class="mut" style="font-size:12px">无匹配节点</span>'}</div>`:''}</div>`}).join('');
+ $('#px').innerHTML=html||`<div class="empty" style="grid-column:1/-1">${q?'没有匹配的节点':'没有策略组'}</div>`;
+ $('#px-expand').textContent=gs.length&&gs.every(g=>PXS.open.has(g.name))?'全部折叠':'全部展开';pxSpeeds()}
+/* 每个策略组当前的实时速度 = 经过它的连接的上下行速度之和（来自连接列表的轮询） */
+function pxSpeeds(){if(CUR!=='proxies')return;const sp={};for(const r of CN.rows){const v=r.dls+r.uls;if(v)for(const g of new Set(r.chains))sp[g]=(sp[g]||0)+v}
+ document.querySelectorAll('#px .gpill.spd').forEach(e=>{const v=sp[e.dataset.spd]||0;e.textContent=fmtSpd(v);e.classList.toggle('idle',!v)})}
+function pxView(v){PXS.view=v;$('#px-view').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+ document.querySelectorAll('#t-proxies .px-g').forEach(e=>e.style.display=v==='groups'?'':'none');document.querySelectorAll('#t-proxies .px-p').forEach(e=>e.style.display=v==='providers'?'':'none');
+ $('#pxq').placeholder=v==='groups'?'搜索节点 / 策略组':'搜索代理集合 / 节点';v==='groups'?renderProxies():renderProviders()}
+$('#px-view').addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(b)pxView(b.dataset.v)});
 function pxSaveOpen(){localStorage.setItem('px-open',JSON.stringify([...PXS.open]))}
 function pxToggle(g){PXS.open.has(g)?PXS.open.delete(g):PXS.open.add(g);pxSaveOpen();renderProxies()}
 function pxExpandAll(){const gs=pxGroups();if(gs.every(g=>PXS.open.has(g.name)))PXS.open.clear();else gs.forEach(g=>PXS.open.add(g.name));pxSaveOpen();renderProxies()}
@@ -2038,13 +2068,13 @@ $('#px').addEventListener('click',e=>{const card=e.target.closest('.pgc');if(!ca
  const a=e.target.closest('[data-act]');if(a&&a.dataset.act==='gtest'){pxTestGroup(g);return}
  const nd=e.target.closest('.nd');if(nd){if(nd.classList.contains('sel'))pxSelect(g,nd.dataset.n);return}
  if(a&&a.dataset.act==='toggle')pxToggle(g)});
-['pxq','pxsort','pxhide'].forEach(id=>$('#'+id).addEventListener(id==='pxq'?'input':'change',renderProxies));
+['pxsort','pxhide'].forEach(id=>$('#'+id).addEventListener('change',renderProxies));$('#pxq').addEventListener('input',()=>PXS.view==='providers'?renderProviders():renderProxies());
 /* 订阅（proxy-providers）里的节点不一定出现在 /proxies 中，合并进来才有类型 / UDP / 延迟历史 */
 function pxMerge(p,pv){const P=Object.assign({},p.proxies||{});Object.values(pv.providers||{}).forEach(v=>(v.proxies||[]).forEach(x=>{if(x&&x.name&&!P[x.name])P[x.name]=x}));return P}
 async function pxRefresh(){try{const [p,pv]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}}))]);PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{}}catch(e){}renderProxies()}
-async function loadProxies(){$('#px-url').value=PXS.url;$('#px-to').value=PXS.to;$('#px-autoclose').checked=PXS.autoclose;
+async function loadProxies(){cnTimer();$('#px-url').value=PXS.url;$('#px-to').value=PXS.to;$('#px-autoclose').checked=PXS.autoclose;
  try{const [p,pv,c]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}})),mh('/configs').catch(()=>null)]);
-  PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{};if(c){MODE=String(c.mode||'');renderModeSw()}renderProxies();renderProviders()}
+  PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{};if(c){MODE=String(c.mode||'');renderModeSw()}pxView(PXS.view||'groups');renderProviders()}
  catch(e){$('#px').innerHTML=`<div class="empty bad">无法读取代理列表：${esc(e.message)}</div>`}}
 function pxSaveSet(){const u=$('#px-url').value.trim(),t=parseInt($('#px-to').value,10);if(!/^https?:\/\//.test(u)){toast('测速地址需以 http(s):// 开头',1);return}
  PXS.url=u;PXS.to=t>0?t:5000;PXS.autoclose=$('#px-autoclose').checked;localStorage.setItem('px-url',PXS.url);localStorage.setItem('px-to',PXS.to);localStorage.setItem('px-autoclose',PXS.autoclose?'1':'0');toast('已保存');renderProxies()}
@@ -2062,7 +2092,8 @@ async function pxTestAll(){const b=$('#px-testall');const names=pxGroups().filte
  await btnBusy(b,async()=>{names.forEach(n=>{TESTING.add('g:'+n);(PX.proxies[n].all||[]).forEach(x=>TESTING.add(x))});renderProxies();
   let i=0;const worker=async()=>{while(i<names.length){const n=names[i++];TESTING.delete('g:'+n);await pxTestGroup(n,true);renderProxies()}};
   await Promise.all([worker(),worker(),worker()]);TESTING.clear();await pxRefresh();toast(`已测速 ${names.length} 个策略组`)})}
-function renderProviders(){const list=Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible');$('#pv-card').style.display=list.length?'':'none';$('#pv-cnt').textContent=list.length;
+function renderProviders(){const all=Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible');$('#px-np').textContent=all.length;const q=$('#pxq').value.trim().toLowerCase();
+ const list=q?all.filter(p=>p.name.toLowerCase().includes(q)||(p.proxies||[]).some(x=>String(x.name).toLowerCase().includes(q))):all;if(PXS.view==='providers'&&!list.length){$('#pvs').innerHTML=`<div class="empty" style="grid-column:1/-1">${q?'没有匹配的代理集合':'没有代理集合（proxy-providers）'}</div>`;return}
  $('#pvs').innerHTML=list.map(p=>{const si=p.subscriptionInfo;let sub='';if(si&&(si.Total||si.Download||si.Upload)){const used=(si.Upload||0)+(si.Download||0),tot=si.Total||0,pct=tot?Math.min(100,used/tot*100):0;
    sub=`<div class="mut" style="font-size:11.5px;margin-top:6px">已用 ${fmtBytes(used)} / ${tot?fmtBytes(tot):'不限'}${tot?` (${pct.toFixed(1)}%)`:''}${si.Expire?` · 到期 ${new Date(si.Expire*1000).toLocaleDateString('zh-CN')}`:''}</div>${tot?`<div class="bar"><i class="${pct>90?'bad':pct>70?'warn':''}" style="width:${pct.toFixed(1)}%"></i></div>`:''}`}
   const ps=p.proxies||[];const ok=ps.filter(x=>{const h=x.history||[];return h.length&&h[h.length-1].delay>0}).length;
@@ -2081,12 +2112,13 @@ $('#cn-sort').innerHTML=CSORT.map(([v,l])=>`<option value="${v}">${l}</option>`)
 function cnRow(c,now){const m=c.metadata||{};const h=m.host||m.sniffHost||m.destinationIP||'';const host=h.includes(':')&&!m.host?`[${h}]`:h;const ch=(c.chains||[]).slice().reverse();
  return {id:c.id,host:host+(m.destinationPort?':'+m.destinationPort:''),net:(m.network||'').toUpperCase(),type:m.type||'',rule:(c.rule||'')+(c.rulePayload?` (${c.rulePayload})`:''),chain:ch.join(' → '),chains:ch,
   dl:c.download||0,ul:c.upload||0,dls:0,uls:0,ip:m.sourceIP||'',src:(m.sourceIP||'')+(m.sourcePort?':'+m.sourcePort:''),proc:m.process||(m.processPath||'').split('/').pop()||'',start:Date.parse(c.start)||now,raw:c}}
-async function cnPoll(){if(CN.busy||$('#cn-pause').checked)return;CN.busy=true;
+async function cnPoll(){if(CN.busy||(CUR==='conns'&&$('#cn-pause').checked))return;CN.busy=true;
  try{const s=await mh('/connections');const now=Date.now(),dt=CN.last?(now-CN.last)/1000:0;CN.last=now;const next=new Map();
   CN.rows=(s.connections||[]).map(c=>{const r=cnRow(c,now),p=CN.prev.get(r.id);if(p&&dt>0){r.dls=Math.max(0,(r.dl-p.dl)/dt);r.uls=Math.max(0,(r.ul-p.ul)/dt)}next.set(r.id,r);return r});
   for(const [id,p] of CN.prev)if(!next.has(id)){p.end=now;p.dls=p.uls=0;CN.closed.unshift(p)}if(CN.closed.length>500)CN.closed.length=500;CN.prev=next;CN.err=''}
- catch(e){CN.err=e.message}finally{CN.busy=false}cnRender()}
-function cnStart(){stickTop();cnRender();if(CN.timer)return;CN.last=0;cnPoll();CN.timer=setInterval(()=>{if(!document.hidden)cnPoll()},1000)}
+ catch(e){CN.err=e.message}finally{CN.busy=false}cnRender();pxSpeeds()}
+function cnTimer(){if(CN.timer)return;CN.last=0;cnPoll();CN.timer=setInterval(()=>{if(!document.hidden)cnPoll()},1000)}
+function cnStart(){stickTop();cnRender();cnTimer()}
 function cnStop(){if(CN.timer){clearInterval(CN.timer);CN.timer=null}}
 function cnList(){const src=CN.view==='active'?CN.rows:CN.closed;const q=$('#cnq').value.trim().toLowerCase(),dev=$('#cn-dev').value;
  const l=src.filter(r=>(!dev||r.ip===dev)&&(!q||[r.host,r.rule,r.chain,r.proc,r.src,r.net,r.type,(r.raw.metadata||{}).destinationIP||''].some(x=>String(x).toLowerCase().includes(q))));
