@@ -9,6 +9,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -99,6 +100,11 @@ class ControllerProxyTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         manager._META_CACHE.update(key=None)
+        # 上一个用例的实时流结束后，后台线程可能还会打出最后一个上游请求，等它们停下再清空
+        n = -1
+        while n != len(self.ctrl.requests):
+            n = len(self.ctrl.requests)
+            time.sleep(0.2)
         self.ctrl.requests.clear()
 
     def request(self, method, path, body=None, auth=True, headers=None):
