@@ -1493,14 +1493,32 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 .prv .act{display:flex;gap:4px;margin-top:8px}
 .bar{height:5px;background:#21262d;border-radius:3px;overflow:hidden;margin-top:5px}.bar i{display:block;height:100%;background:var(--acc)}.bar i.warn{background:var(--warn)}.bar i.bad{background:var(--bad)}
 /* connections */
-.cwrap{overflow:auto;max-height:72vh;border:1px solid var(--bd);border-radius:8px;background:var(--ink)}
-.ctbl{width:100%;border-collapse:collapse;font-size:12.5px}
-.ctbl th{position:sticky;top:0;background:var(--card2);color:var(--mut);font-weight:500;text-align:left;padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:1px solid var(--bd);z-index:1}
-.ctbl th:hover{color:var(--fg)}.ctbl th.s{color:var(--fg)}.ctbl th.s:after{content:" ▾"}.ctbl th.s.asc:after{content:" ▴"}
-.ctbl td{padding:5px 8px;border-bottom:1px solid var(--bd);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
-.ctbl tbody tr{cursor:pointer}.ctbl tbody tr:hover td{background:rgba(255,255,255,.025)}
-.ctbl td.num{font-family:var(--mono);font-size:12px;text-align:right}.ctbl td.x{width:1%;padding:2px 4px}
-.mob{display:none}
+/* 连接列表：随页面滚动、不横向滚动，列随宽度逐级收起 */
+.cn-tb{margin-bottom:0}.cn-opts{display:contents}.cn-tb .search{flex:2 1 220px;max-width:420px}.cn-opts select{width:auto;max-width:170px}
+.cl{border:1px solid var(--bd);border-radius:8px;background:var(--ink)}
+.cr,.cr-h{display:grid;grid-template-columns:minmax(0,1fr) 150px 58px 96px 104px 28px;gap:0 12px;align-items:center;padding:7px 8px 7px 11px}
+.cr-h{position:sticky;z-index:2;background:var(--card2);border-bottom:1px solid var(--bd);border-radius:8px 8px 0 0;font-size:11.5px;color:var(--mut);padding-top:6px;padding-bottom:6px}
+.cr-h span{cursor:pointer;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cr-h span:hover,.cr-h .s{color:var(--fg)}.cr-h .r{text-align:right}
+.cr-h .s:after{content:" ▾"}.cr-h .s.asc:after{content:" ▴"}
+.cr{border-top:1px solid var(--bd);border-left:3px solid transparent;cursor:pointer;transition:background .1s}#cn-rows .cr:first-child{border-top:0}
+.cr:hover{background:rgba(255,255,255,.03)}.cr.hot{border-left-color:var(--acc)}.cr.closed .c-main{opacity:.65}
+.c-main{min-width:0}
+.c-l1,.c-l2,.c-l3{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
+.c-host{font-size:13px;font-weight:550;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.c-l1 .tag{flex:none;font-size:10px;padding:0 5px;line-height:15px}.c-in{flex:none;font-size:11px;color:var(--mut)}
+.c-l2{font-size:11.5px;color:var(--mut);margin-top:2px}
+.c-rule{flex:0 1 auto;max-width:42%;overflow:hidden;text-overflow:ellipsis}.c-l2 i{font-style:normal;flex:none;opacity:.6}
+.c-chain{flex:1 1 0;overflow:hidden;text-overflow:ellipsis;min-width:0}.c-chain b{color:var(--fg);font-weight:500}.c-chain b.ok{color:var(--ok)}.c-chain b.bad{color:var(--bad)}
+.c-l3{display:none;font:11px var(--mono);color:var(--mut);margin-top:2px}.c-l3 span{overflow:hidden;text-overflow:ellipsis;min-width:0}.c-l3 b{font-weight:400;flex:none}
+.c-src,.c-tot,.c-spd{display:flex;flex-direction:column;font:11.5px/1.45 var(--mono);min-width:0;white-space:nowrap}
+.c-src span,.c-src small{overflow:hidden;text-overflow:ellipsis}.c-src small{color:var(--mut);font:11px -apple-system,BlinkMacSystemFont,sans-serif}
+.c-time{font:11.5px var(--mono);color:var(--mut);text-align:right;white-space:nowrap}
+.c-tot{color:var(--mut);text-align:right}.c-spd{text-align:right}.c-spd .d{color:var(--acc)}.c-spd .u{color:var(--cyan)}.c-spd .z{color:var(--bd2)}
+.c-x{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;border:0;background:none;color:var(--mut);cursor:pointer;font-size:13px}.c-x:hover{background:rgba(248,81,73,.15);color:var(--bad)}
+.cn-empty{border:0;border-radius:0}
+@media (max-width:980px){
+ .cr,.cr-h{grid-template-columns:minmax(0,1fr) 104px 28px}.c-src,.c-tot,.c-time,.cr-h [data-k=src],.cr-h [data-k=dl],.cr-h [data-k=start]{display:none}.c-l3{display:flex}
+}
 /* runtime rules / lists */
 .lst{display:flex;flex-direction:column;gap:6px}
 .li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;background:var(--ink);border:1px solid var(--bd);border-left:3px solid var(--cyan);border-radius:8px;padding:8px 12px}
@@ -1551,13 +1569,16 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
  .charts{grid-template-columns:1fr}.chart canvas{height:130px}
  .seg button{padding:6px 12px;font-size:13.5px}.toolbar .seg{flex:1 1 100%}.toolbar .seg button{flex:1}
  .pxg{grid-template-columns:1fr}.nds{grid-template-columns:1fr 1fr;padding:4px 8px 10px}.pgc-now,.dots{padding-left:12px}
- .mob{display:block}input[type=number]{font-size:16px;min-height:40px}
- .cwrap{max-height:none;border:0;background:none}
- .ctbl thead{display:none}.ctbl,.ctbl tbody,.ctbl tr,.ctbl td{display:block;width:100%}
- .ctbl tr{background:var(--ink);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px;position:relative}
- .ctbl td{border:0;padding:1px 0;max-width:none;white-space:normal;word-break:break-all;display:flex;gap:8px;text-align:left}.ctbl td.num{text-align:left}
- .ctbl td:before{content:attr(data-l);color:var(--mut);min-width:60px;flex:none;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
- .ctbl td.x{position:absolute;top:6px;right:6px;width:auto}.ctbl td.x:before{display:none}
+ input[type=number]{font-size:16px;min-height:40px}
+ #t-conns .card{padding:10px 0 12px;background:none;border:0}
+ #t-conns .toolbar{position:static;padding:0 0 10px;border:0;background:none;gap:8px}
+ #t-conns .toolbar .seg{flex:1 1 100%}#t-conns .search{flex:1 1 100%}
+ .cn-opts{display:flex;gap:8px;flex:1 1 100%;align-items:center}.cn-opts select{flex:1 1 0;min-width:0;font-size:14px;min-height:36px}.cn-opts .switch{flex:none;min-height:36px}
+ #t-conns .toolbar .info{flex:1 1 auto;font-size:11.5px}#t-conns .toolbar .btn{flex:none;min-height:34px}
+ .cr-h{display:none}.cl{border-radius:10px}
+ .cr{grid-template-columns:minmax(0,1fr) auto 26px;gap:0 8px;padding:9px 6px 9px 10px}.c-time{display:none}
+ .c-host{font-size:13.5px}.c-spd{font-size:11px}.c-spd .z{display:none}#t-conns .toolbar .info{text-align:left}
+ .cn-opts select{max-width:none}#t-conns .toolbar .search{max-width:none}
  .rr{grid-template-columns:36px minmax(0,1fr);grid-template-areas:"i ty" "i pl" "i px";gap:1px 8px}.rr .i{grid-area:i;align-self:start}.rr .ty{grid-area:ty}.rr .pl{grid-area:pl;white-space:normal;word-break:break-all}.rr .px{grid-area:px}
  .ll{grid-template-columns:58px minmax(0,1fr);grid-template-areas:"tm lv" "msg msg"}.ll .tm{grid-area:tm}.ll .lv{grid-area:lv}.ll .msg{grid-area:msg}
  .sgrid{grid-template-columns:1fr}
@@ -1678,16 +1699,19 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 </section>
 <section class="tab" id="t-conns">
  <div class="card">
-  <div class="toolbar">
+  <div class="toolbar cn-tb">
    <span class="seg" id="cn-view"><button data-v="active" class="on">活动 <span id="cn-na">0</span></button><button data-v="closed">已关闭 <span id="cn-nc">0</span></button></span>
    <span class="search"><input type="search" id="cnq" placeholder="过滤主机 / IP / 规则 / 链路 / 进程" autocomplete="off"></span>
-   <select id="cn-sort" class="mob"></select>
-   <label class="switch"><input type="checkbox" id="cn-pause"><i></i>暂停刷新</label>
-   <span class="sp"></span><span class="info" id="cn-info"></span>
-   <button class="btn dan" id="cn-closeall" onclick="cnCloseAll()">断开全部</button>
+   <span class="cn-opts">
+    <select id="cn-dev" title="按来源设备筛选"><option value="">全部来源</option></select>
+    <select id="cn-sort" title="排序"></select>
+    <label class="switch"><input type="checkbox" id="cn-pause"><i></i>暂停</label>
+   </span>
+   <span class="sp"></span><span class="info mono" id="cn-info"></span>
+   <button class="btn dan sm" id="cn-closeall" onclick="cnCloseAll()">断开全部</button>
   </div>
-  <div class="cwrap"><table class="ctbl"><thead id="cn-h"></thead><tbody id="cn-b"></tbody></table></div>
-  <div class="mut" id="cn-more" style="font-size:12px;margin-top:6px"></div>
+  <div class="cl" id="cn-list"><div class="cr-h" id="cn-h"><span data-k="host">连接 / 规则 → 链路</span><span data-k="src">来源 / 进程</span><span data-k="start" class="r">时长</span><span data-k="dl" class="r">流量</span><span data-k="dls" class="r">速度</span><span></span></div><div id="cn-rows"></div><div class="empty cn-empty" id="cn-empty" style="display:none"></div></div>
+  <div class="mut" id="cn-more" style="font-size:12px;margin-top:8px"></div>
  </div>
 </section>
 <section class="tab" id="t-rtrules">
@@ -1797,7 +1821,7 @@ function rel(epoch){const ms=Date.now()-epoch*1000;return ms<60000?'刚刚':fmtD
 function parseTs(t){const m=/(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(t||'');return m?new Date(m[1]+'T'+m[2]):null}
 function panel(id,state,title){const p=$('#p-'+id);if(p){p.className='panel'+(state?' '+state:'');}const t=$('#p-'+id+'-t');if(t)t.innerHTML=title||''}
 function clearOut(id){$('#out-'+id).textContent='';$('#out-'+id).className='mut';panel(id,'')}
-function stickTop(){const h=document.querySelector('.top').offsetHeight;document.querySelectorAll('.toolbar').forEach(e=>e.style.top=h+'px')}
+function stickTop(){const h=document.querySelector('.top').offsetHeight;document.querySelectorAll('.toolbar').forEach(e=>e.style.top=h+'px');const tb=$('#t-conns .toolbar');$('#cn-h').style.top=(h+(tb?tb.offsetHeight:0))+'px'}
 async function copyText(t,what){try{await navigator.clipboard.writeText(t);toast(`已复制 ${what}`)}catch(e){toast('复制失败: '+e.message,1)}}
 const LOADERS={rules:loadRules,override:loadOverride,backups:loadBackups,update:loadUpdate,proxies:loadProxies,logs:loadLogsTab,config:loadConfig,status:loadStatus,conns:cnStart,rtrules:loadRtRules,settings:loadSettings};
 let CUR='status';
@@ -2050,41 +2074,56 @@ async function pvUpdateAll(b){const names=Object.values(PX.providers||{}).filter
  await btnBusy(b,async()=>{const r=await Promise.allSettled(names.map(n=>mh('/providers/proxies/'+enc(n),'PUT')));const bad=r.filter(x=>x.status==='rejected').length;toast(bad?`${bad} 个代理集合更新失败`:`已更新 ${names.length} 个代理集合`,!!bad)});loadProxies()}
 
 /* ---------- 连接 ---------- */
-const CCOLS=[['host','主机'],['net','类型'],['rule','规则'],['chain','链路'],['dls','↓ 速度'],['uls','↑ 速度'],['dl','↓ 总量'],['ul','↑ 总量'],['src','来源'],['proc','进程'],['start','时长']];
+const CSORT=[['start:-1','最新优先'],['start:1','最早优先'],['dls:-1','下载速度'],['uls:-1','上传速度'],['dl:-1','下载总量'],['ul:-1','上传总量'],['host:1','主机'],['src:1','来源'],['proc:1','进程'],['rule:1','规则'],['chain:1','链路']];
 const CNUM=new Set(['dls','uls','dl','ul','start']);
-const CN={rows:[],prev:new Map(),closed:[],view:'active',sk:'start',sd:-1,timer:null,busy:false,last:0,err:''};
-$('#cn-sort').innerHTML=CCOLS.flatMap(([k,l])=>[`<option value="${k}:-1">${l} ↓</option>`,`<option value="${k}:1">${l} ↑</option>`]).join('');$('#cn-sort').value='start:-1';
-function cnRow(c,now){const m=c.metadata||{};const h=m.host||m.sniffHost||m.destinationIP||'';const host=h.includes(':')&&!m.host?`[${h}]`:h;
- return {id:c.id,host:host+(m.destinationPort?':'+m.destinationPort:''),net:(m.network||'').toUpperCase(),type:m.type||'',rule:(c.rule||'')+(c.rulePayload?` (${c.rulePayload})`:''),chain:(c.chains||[]).slice().reverse().join(' → '),
-  dl:c.download||0,ul:c.upload||0,dls:0,uls:0,src:(m.sourceIP||'')+(m.sourcePort?':'+m.sourcePort:''),proc:m.process||(m.processPath||'').split('/').pop()||'',start:Date.parse(c.start)||now,raw:c}}
+const CN={rows:[],prev:new Map(),closed:[],view:'active',sk:'start',sd:-1,timer:null,busy:false,last:0,err:'',el:new Map(),devKey:''};
+$('#cn-sort').innerHTML=CSORT.map(([v,l])=>`<option value="${v}">${l}</option>`).join('');$('#cn-sort').value='start:-1';
+function cnRow(c,now){const m=c.metadata||{};const h=m.host||m.sniffHost||m.destinationIP||'';const host=h.includes(':')&&!m.host?`[${h}]`:h;const ch=(c.chains||[]).slice().reverse();
+ return {id:c.id,host:host+(m.destinationPort?':'+m.destinationPort:''),net:(m.network||'').toUpperCase(),type:m.type||'',rule:(c.rule||'')+(c.rulePayload?` (${c.rulePayload})`:''),chain:ch.join(' → '),chains:ch,
+  dl:c.download||0,ul:c.upload||0,dls:0,uls:0,ip:m.sourceIP||'',src:(m.sourceIP||'')+(m.sourcePort?':'+m.sourcePort:''),proc:m.process||(m.processPath||'').split('/').pop()||'',start:Date.parse(c.start)||now,raw:c}}
 async function cnPoll(){if(CN.busy||$('#cn-pause').checked)return;CN.busy=true;
  try{const s=await mh('/connections');const now=Date.now(),dt=CN.last?(now-CN.last)/1000:0;CN.last=now;const next=new Map();
   CN.rows=(s.connections||[]).map(c=>{const r=cnRow(c,now),p=CN.prev.get(r.id);if(p&&dt>0){r.dls=Math.max(0,(r.dl-p.dl)/dt);r.uls=Math.max(0,(r.ul-p.ul)/dt)}next.set(r.id,r);return r});
   for(const [id,p] of CN.prev)if(!next.has(id)){p.end=now;p.dls=p.uls=0;CN.closed.unshift(p)}if(CN.closed.length>500)CN.closed.length=500;CN.prev=next;CN.err=''}
  catch(e){CN.err=e.message}finally{CN.busy=false}cnRender()}
-function cnStart(){cnRender();if(CN.timer)return;CN.last=0;cnPoll();CN.timer=setInterval(()=>{if(!document.hidden)cnPoll()},1000)}
+function cnStart(){stickTop();cnRender();if(CN.timer)return;CN.last=0;cnPoll();CN.timer=setInterval(()=>{if(!document.hidden)cnPoll()},1000)}
 function cnStop(){if(CN.timer){clearInterval(CN.timer);CN.timer=null}}
-function cnList(){const src=CN.view==='active'?CN.rows:CN.closed;const q=$('#cnq').value.trim().toLowerCase();
- const l=q?src.filter(r=>[r.host,r.rule,r.chain,r.proc,r.src,r.net,r.type,(r.raw.metadata||{}).destinationIP||''].some(x=>String(x).toLowerCase().includes(q))):src.slice();
+function cnList(){const src=CN.view==='active'?CN.rows:CN.closed;const q=$('#cnq').value.trim().toLowerCase(),dev=$('#cn-dev').value;
+ const l=src.filter(r=>(!dev||r.ip===dev)&&(!q||[r.host,r.rule,r.chain,r.proc,r.src,r.net,r.type,(r.raw.metadata||{}).destinationIP||''].some(x=>String(x).toLowerCase().includes(q))));
  const k=CN.sk,d=CN.sd;l.sort((a,b)=>(CNUM.has(k)?a[k]-b[k]:String(a[k]).localeCompare(String(b[k])))*d);return l}
-function cnRender(){if(CUR!=='conns')return;const now=Date.now(),act=CN.view==='active';const l=cnList(),LIM=300;
- $('#cn-na').textContent=CN.rows.length;$('#cn-nc').textContent=CN.closed.length;$('#cn-closeall').textContent=act?($('#cnq').value.trim()?'断开筛选结果':'断开全部'):'清空记录';
+function cnDevs(){const sel=$('#cn-dev');if(document.activeElement===sel)return;const cnt=new Map();(CN.view==='active'?CN.rows:CN.closed).forEach(r=>{if(r.ip)cnt.set(r.ip,(cnt.get(r.ip)||0)+1)});
+ const cur=sel.value;if(cur&&!cnt.has(cur))cnt.set(cur,0);const list=[...cnt].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));const key=list.map(x=>x.join('=')).join(',');if(key===CN.devKey)return;CN.devKey=key;
+ sel.innerHTML=`<option value="">全部来源</option>`+list.map(([ip,n])=>`<option value="${attr(ip)}">${esc(ip)} (${n})</option>`).join('');sel.value=cur}
+function cnChain(r){const c=r.chains;if(!c.length)return'';const last=c[c.length-1],cls=last==='DIRECT'?'ok':/^REJECT/.test(last)?'bad':'';return c.slice(0,-1).map(x=>esc(x)+' → ').join('')+`<b class="${cls}">${esc(last)}</b>`}
+function cnRowHtml(r,now,act){const dur=fmtDurS((r.end||now)-r.start),sp=(v,c,a)=>v?`<span class="${c}">${a} ${fmtSpd(v)}</span>`:`<span class="z">${a} -</span>`;
+ return `<div class="c-main"><div class="c-l1"><span class="c-host" title="${attr(r.host)}">${esc(r.host)}</span><span class="tag">${esc(r.net)}</span><span class="c-in">${esc(r.type)}</span></div>
+ <div class="c-l2" title="${attr(r.rule+' → '+r.chain)}"><span class="c-rule">${esc(r.rule)}</span><i>→</i><span class="c-chain">${cnChain(r)}</span></div>
+ <div class="c-l3"><span>${esc(r.src)}${r.proc?' · '+esc(r.proc):''}</span><b>· ${dur} · ↓${fmtShort(r.dl)} ↑${fmtShort(r.ul)}</b></div></div>
+ <div class="c-src"><span>${esc(r.src)}</span><small>${esc(r.proc||'-')}</small></div><div class="c-time">${dur}</div>
+ <div class="c-tot"><span>↓ ${fmtShort(r.dl)}</span><span>↑ ${fmtShort(r.ul)}</span></div><div class="c-spd">${sp(r.dls,'d','↓')}${sp(r.uls,'u','↑')}</div>
+ ${act?'<button class="c-x" data-close title="断开此连接">✕</button>':'<span></span>'}`}
+function cnRender(){if(CUR!=='conns')return;const now=Date.now(),act=CN.view==='active';cnDevs();const l=cnList(),LIM=300,filtered=!!($('#cnq').value.trim()||$('#cn-dev').value);
+ $('#cn-na').textContent=CN.rows.length;$('#cn-nc').textContent=CN.closed.length;$('#cn-closeall').textContent=act?(filtered?`断开筛选的 ${l.length} 个`:'断开全部'):'清空记录';$('#cn-closeall').disabled=!l.length;
  const ud=CN.rows.reduce((a,r)=>[a[0]+r.dls,a[1]+r.uls],[0,0]);
- $('#cn-info').innerHTML=CN.err?`<span class="bad">${esc(CN.err)}</span>`:act?`↓ ${fmtSpd(ud[0])} · ↑ ${fmtSpd(ud[1])}`:'';
- $('#cn-h').innerHTML='<tr>'+CCOLS.map(([k,lb])=>`<th data-k="${k}" class="${CN.sk===k?'s'+(CN.sd>0?' asc':''):''}">${lb}</th>`).join('')+'<th></th></tr>';
- const td=(l2,v,cls='',t)=>`<td data-l="${l2}" class="${cls}"${t?` title="${attr(t)}"`:''}>${v}</td>`;
- $('#cn-b').innerHTML=l.slice(0,LIM).map(r=>`<tr data-id="${attr(r.id)}">${td('主机',esc(r.host),'',r.host)}${td('类型',`<span class="tag">${esc(r.net)}</span> <span class="mut">${esc(r.type)}</span>`)}${td('规则',esc(r.rule),'',r.rule)}${td('链路',esc(r.chain),'',r.chain)}
-  ${td('↓ 速度',r.dls?fmtSpd(r.dls):'-','num')}${td('↑ 速度',r.uls?fmtSpd(r.uls):'-','num')}${td('↓ 总量',fmtBytes(r.dl),'num')}${td('↑ 总量',fmtBytes(r.ul),'num')}${td('来源',esc(r.src),'mono')}${td('进程',esc(r.proc||'-'),'',r.raw.metadata&&r.raw.metadata.processPath)}${td('时长',fmtDurS((r.end||now)-r.start),'num')}
-  <td class="x">${act?'<button class="btn sm ghost" data-close title="断开">✕</button>':''}</td></tr>`).join('')||`<tr><td colspan="12" class="mut" style="text-align:center;padding:20px">${act?'没有活动连接':'暂无已关闭的连接'}</td></tr>`;
- $('#cn-more').textContent=l.length>LIM?`共 ${l.length} 条，仅显示前 ${LIM} 条，请用过滤缩小范围`:(act?'':'记录本页打开期间关闭的连接，最多 500 条')}
-$('#cn-h').addEventListener('click',e=>{const th=e.target.closest('th[data-k]');if(!th)return;const k=th.dataset.k;if(CN.sk===k)CN.sd=-CN.sd;else{CN.sk=k;CN.sd=CNUM.has(k)?-1:1}$('#cn-sort').value=`${CN.sk}:${CN.sd}`;cnRender()});
+ $('#cn-info').innerHTML=CN.err?`<span class="bad">${esc(CN.err)}</span>`:act?`↓ ${fmtSpd(ud[0])} ↑ ${fmtSpd(ud[1])}`:'';
+ $('#cn-h').querySelectorAll('span[data-k]').forEach(s=>{const on=s.dataset.k===CN.sk||(s.dataset.k==='dl'&&CN.sk==='ul')||(s.dataset.k==='dls'&&CN.sk==='uls');s.className=(s.classList.contains('r')?'r ':'')+(on?'s'+(CN.sd>0?' asc':''):'')});
+ const box=$('#cn-rows'),seen=new Set();let prev=null;
+ for(const r of l.slice(0,LIM)){const h=cnRowHtml(r,now,act),cls='cr'+(act&&(r.dls>1024||r.uls>1024)?' hot':'')+(act?'':' closed');let e=CN.el.get(r.id);
+  if(!e){const el=document.createElement('div');el.dataset.id=r.id;e={el,h:'',cls:''};CN.el.set(r.id,e)}
+  if(e.h!==h){e.el.innerHTML=h;e.h=h}if(e.cls!==cls){e.el.className=cls;e.cls=cls}
+  const ref=prev?prev.nextSibling:box.firstChild;if(e.el!==ref)box.insertBefore(e.el,ref);prev=e.el;seen.add(r.id)}
+ for(const [id,e] of CN.el)if(!seen.has(id)){e.el.remove();CN.el.delete(id)}
+ const em=$('#cn-empty');em.style.display=l.length?'none':'';em.textContent=CN.err&&!CN.rows.length?'无法读取连接：'+CN.err:filtered?'没有匹配的连接':act?'没有活动连接':'本页打开后还没有连接关闭';
+ $('#cn-more').textContent=l.length>LIM?`共 ${l.length} 条，只显示前 ${LIM} 条，可用过滤或来源缩小范围`:(act?'':'记录本页打开期间关闭的连接，最多 500 条')}
+$('#cn-h').addEventListener('click',e=>{const s=e.target.closest('span[data-k]');if(!s)return;const k=s.dataset.k;if(CN.sk===k)CN.sd=-CN.sd;else{CN.sk=k;CN.sd=CNUM.has(k)?-1:1}
+ const v=`${CN.sk}:${CN.sd}`;$('#cn-sort').value=CSORT.some(x=>x[0]===v)?v:'';cnRender()});
 $('#cn-sort').addEventListener('change',e=>{const [k,d]=e.target.value.split(':');CN.sk=k;CN.sd=+d;cnRender()});
-$('#cn-b').addEventListener('click',e=>{const tr=e.target.closest('tr[data-id]');if(!tr)return;if(e.target.closest('[data-close]')){cnClose(tr.dataset.id);return}cnDetail(tr.dataset.id)});
-$('#cn-view').addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(!b)return;CN.view=b.dataset.v;$('#cn-view').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cnRender()});
-$('#cnq').addEventListener('input',cnRender);$('#cn-pause').addEventListener('change',()=>{CN.last=0;cnRender()});
+$('#cn-rows').addEventListener('click',e=>{const row=e.target.closest('.cr');if(!row)return;if(e.target.closest('[data-close]')){cnClose(row.dataset.id);return}if(getSelection().toString())return;cnDetail(row.dataset.id)});
+$('#cn-view').addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(!b)return;CN.view=b.dataset.v;CN.devKey='';$('#cn-view').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cnRender()});
+$('#cnq').addEventListener('input',cnRender);$('#cn-dev').addEventListener('change',cnRender);$('#cn-pause').addEventListener('change',()=>{CN.last=0;cnRender()});
 async function cnClose(id){try{await mh('/connections/'+enc(id),'DELETE');toast('已断开连接');closeModal();cnPoll()}catch(e){toast(e.message,1)}}
 async function cnCloseAll(all){if(!all&&CN.view==='closed'){CN.closed=[];cnRender();return}
- const q=all?'':$('#cnq').value.trim();if(q){const ids=cnList().map(r=>r.id);if(!ids.length)return;if(!confirm(`断开筛选出的 ${ids.length} 个连接？`))return;
+ const q=all?'':($('#cnq').value.trim()||$('#cn-dev').value);if(q){const ids=cnList().map(r=>r.id);if(!ids.length)return;if(!confirm(`断开筛选出的 ${ids.length} 个连接？`))return;
   const r=await Promise.allSettled(ids.map(id=>mh('/connections/'+enc(id),'DELETE')));toast(`已断开 ${r.filter(x=>x.status==='fulfilled').length} 个连接`)}
  else{if(!confirm('断开所有活动连接？'))return;try{await mh('/connections','DELETE');toast('已断开所有连接')}catch(e){toast(e.message,1)}}
  if(CUR==='conns')cnPoll()}
