@@ -177,6 +177,14 @@ class ControllerProxyTests(unittest.TestCase):
             if "conns" in m:
                 self.assertEqual(m["conns"], {"count": 2, "uploadTotal": 5, "downloadTotal": 10})
 
+    def test_status_never_exposes_controller_secret(self):
+        status, _, body = self.request("GET", "/api/status")
+        self.assertEqual(status, 200)
+        self.assertNotIn("dashboard", json.loads(body))
+        self.assertNotIn(SECRET.encode(), body)
+        status, _, page = self.request("GET", "/")
+        self.assertNotIn(b'id="dash"', page)
+
     def test_unreachable_controller_returns_502(self):
         dead = Path(self.tmp.name) / "dead.yaml"
         with socket_free_port() as port:

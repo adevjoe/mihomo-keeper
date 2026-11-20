@@ -51,10 +51,6 @@ SUB_URL_FILE = Path(os.environ.get("MIHOMO_SUB_URL_FILE", str(MIHOMO_DIR / "subs
 LISTEN = os.environ.get("MANAGER_LISTEN", "0.0.0.0:9092")
 AUTH_USER = os.environ.get("MANAGER_USER", "admin")
 SERVICE = os.environ.get("MIHOMO_SERVICE", "mihomo")
-# 外部面板（metacubexd / zashboard 等）跳转地址模板，留空则不显示跳转链接。
-# 支持占位符：{host} 浏览器访问管理页用的主机名，{port} controller 端口，{secret} controller secret（均已 URL 编码）
-DASHBOARD_URL = os.environ.get("MANAGER_DASHBOARD_URL", "").strip()
-DASHBOARD_NAME = os.environ.get("MANAGER_DASHBOARD_NAME", "").strip() or "面板"
 
 LOCK = threading.Lock()  # 串行化所有写操作
 
@@ -210,16 +206,9 @@ def api_status():
         version = controller("GET", "/version")
     except Exception as ex:
         version = {"error": str(ex)}
-    base, secret = cfg_meta()
+    base, _ = cfg_meta()
     return {
         "service": svc,
-        "dashboard": {
-            "url": DASHBOARD_URL,
-            "name": DASHBOARD_NAME,
-            "port": base.rsplit(":", 1)[1] if base else "",
-            # 只有模板里用到 {secret} 时才下发
-            "secret": secret if "{secret}" in DASHBOARD_URL else "",
-        } if DASHBOARD_URL else None,
         "version": version,
         "controller": base,
         "config": file_info(CONFIG_FILE),
@@ -1326,7 +1315,6 @@ header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--mut);flex:none}
 .dot.ok{background:var(--ok);box-shadow:0 0 0 3px rgba(63,185,80,.18)}.dot.bad{background:var(--bad);box-shadow:0 0 0 3px rgba(248,81,73,.18)}.dot.acc{background:var(--acc)}.dot.warn{background:var(--warn)}
 .dot.live{animation:pulse 1.6s ease-in-out infinite}@keyframes pulse{50%{box-shadow:0 0 0 6px rgba(63,185,80,0)}}
-header a.ext{font-size:12px;border:1px solid var(--bd);border-radius:6px;padding:4px 10px;color:var(--fg);background:var(--card)}header a.ext:hover{border-color:var(--bd2);text-decoration:none}
 nav{display:flex;gap:2px;padding:0 22px;max-width:1200px;margin:0 auto;overflow-x:auto;scrollbar-width:none}nav::-webkit-scrollbar{display:none}
 nav button{background:none;border:none;color:var(--mut);padding:8px 12px 10px;cursor:pointer;border-bottom:2px solid transparent;font-size:13.5px;white-space:nowrap;font-family:inherit;border-radius:6px 6px 0 0;transition:color .12s}
 nav button:hover{color:var(--fg);background:rgba(255,255,255,.03)}nav button.on{color:var(--fg);border-color:var(--acc);font-weight:600}
@@ -1556,7 +1544,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 .kvs{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 14px;font-size:12.5px}.kvs b{color:var(--mut);font-weight:500;white-space:nowrap}.kvs span{font-family:var(--mono);word-break:break-all}
 @media (max-width:640px){
  body{font-size:15px}
- header{padding:10px 12px 6px;padding-top:calc(10px + env(safe-area-inset-top));gap:8px}header h1{font-size:15px}header .pill{font-size:11px}header a.ext{display:inline-flex;align-items:center;min-height:32px;padding:4px 10px;white-space:nowrap}header a.ext .lg{display:none}
+ header{padding:10px 12px 6px;padding-top:calc(10px + env(safe-area-inset-top));gap:8px}header h1{font-size:15px}header .pill{font-size:11px}
  nav{padding:0 6px}nav button{padding:8px 9px 9px;font-size:13.5px}nav button small{display:none}nav button small.dotn{display:inline-block}.gl{display:none}.ng+.ng{margin-left:4px;padding-left:4px}
  main{padding:10px;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
  .card{padding:12px;margin-bottom:10px}
@@ -1601,8 +1589,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 }
 </style></head><body>
 <div class="top">
-<header><div class="logo">M</div><h1>mihomo 管理</h1><span class="pill" id="hstate"><span class="dot"></span>…</span><span class="pill spd" id="hspd" style="display:none" title="实时上传 / 下载速度"><span class="u" id="hspd-u"></span><span class="d" id="hspd-d"></span></span><span class="sp"></span>
-<a id="dash" class="ext" href="#" target="_blank" rel="noopener" style="display:none"></a></header>
+<header><div class="logo">M</div><h1>mihomo 管理</h1><span class="pill" id="hstate"><span class="dot"></span>…</span><span class="pill spd" id="hspd" style="display:none" title="实时上传 / 下载速度"><span class="u" id="hspd-u"></span><span class="d" id="hspd-d"></span></span><span class="sp"></span></header>
 <nav>
 <div class="ng"><button data-t="status" class="on">概览</button><button data-t="proxies">代理</button><button data-t="conns">连接<small id="nav-conns"></small></button><button data-t="rtrules">规则</button><button data-t="logs">日志</button></div>
 <div class="ng"><span class="gl">配置</span><button data-t="rules">自定义规则</button><button data-t="override">override<small>yaml</small></button><button data-t="config">config<small>只读</small></button><button data-t="settings">内核设置</button></div>
@@ -1847,7 +1834,6 @@ window.addEventListener('resize',stickTop);
 /* ---------- status ---------- */
 async function loadStatus(){try{const s=await api('/api/status');const sv=s.service||{};const act=sv.ActiveState==='active';
  $('#hstate').innerHTML=`<span class="dot ${act?'ok live':'bad'}"></span>${act?'运行中':esc(sv.ActiveState||'未知')}`;
- {const d=s.dashboard,a=$('#dash');if(d?.url){const v={host:location.hostname,port:d.port||'',secret:d.secret||''};a.href=d.url.replace(/\{(host|port|secret)\}/g,(_,k)=>encodeURIComponent(v[k]));a.textContent=`${d.name} ↗`;a.style.display=''}else a.style.display='none'}
  const ver=s.version?.version,since=parseTs(sv.ActiveEnterTimestamp),now=parseTs(s.now)||new Date();
  $('#h-big').className='big '+(act?'ok':'bad');$('#h-t').textContent=act?'mihomo 运行中':`mihomo ${sv.ActiveState||'未知'} (${sv.SubState||'-'})`;
  $('#h-s').textContent=[ver?(/^v/i.test(ver)?ver:`v${ver}`):(s.version?.error?'controller 不可达':''),act&&sv.MainPID?`PID ${sv.MainPID}`:'',act&&since?`已运行 ${fmtDur(now-since)}`:'',`重启 ${sv.NRestarts??0} 次`].filter(Boolean).join(' · ');

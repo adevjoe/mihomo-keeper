@@ -86,7 +86,6 @@ GitHub 直连下载失败时，内核 / 数据库下载会自动改走本机 mih
 ├── manager.token        # 管理页自动登录 Token（chmod 600）
 ├── backup/              # config.yaml 历史备份
 ├── geoip.metadb / ASN.mmdb ...
-└── ui/                  # 可选：外部面板（管理页已内置面板功能，通常不需要）
 ```
 
 ## 安装
@@ -146,24 +145,6 @@ MIHOMO_DIR=/tmp/mk MANAGER_LISTEN=127.0.0.1:9092 MANAGER_PASSWORD=test python3 m
 # 打开 http://127.0.0.1:9092 （admin / test）；依赖 systemctl / mihomo 的功能会报错，属正常
 ```
 
-### 外部面板（可选）
-
-管理页已内置代理、连接、规则、实时日志等面板功能，一般不再需要 metacubexd。仍想同时使用外部面板时（`ui/` 不包含在本仓库中）：
-
-1. 下载 [metacubexd](https://github.com/MetaCubeX/metacubexd/releases) 的构建产物（`compressed-dist.tgz`），解压到 `/etc/mihomo/ui`
-2. 在 `override.yaml` 中设置 `external-controller`、`secret`、`external-ui: ui`
-3. 设置 `MANAGER_DASHBOARD_URL`，管理页顶部才会出现面板跳转链接（默认不显示）。地址支持占位符 `{host}`（浏览器访问管理页用的主机名）、`{port}`（controller 端口）、`{secret}`（controller secret），替换时会做 URL 编码，例如：
-
-   ```bash
-   # 本机 mihomo 托管的 metacubexd，自动填好连接信息
-   MANAGER_DASHBOARD_URL='http://{host}:{port}/ui/#/setup?hostname={host}&port={port}&secret={secret}'
-   # 或者直接用公共托管的面板 / 自建地址
-   MANAGER_DASHBOARD_URL='https://dash.example.com/'
-   MANAGER_DASHBOARD_NAME=metacubexd
-   ```
-
-   注意：模板中含 `{secret}` 时，secret 会下发给已登录管理页的浏览器。
-
 ### Token 自动登录
 
 Token 与管理页密码、mihomo controller 的 `secret` 相互独立。安装脚本会创建 `manager.token`；已有部署也可以手动启用：
@@ -210,8 +191,6 @@ Token 和自动登录链接都拥有管理页的完整权限，请像密码一�
 | `UPDATE_SCRIPT` | 与 manager.py 同目录的 `update-subscription.sh` | 订阅更新脚本路径 |
 | `BACKUP_KEEP` | `20` | `update-subscription.sh` 保留的 config.yaml 备份数 |
 | `MIHOMO_APPLY_MODE` | `reload` | `update-subscription.sh` 应用新配置的方式：`reload` 走 controller 热重载（失败自动回退重启），`restart` 总是 `systemctl restart` |
-| `MANAGER_DASHBOARD_URL` | 空 | 外部面板跳转地址模板，支持 `{host}` / `{port}` / `{secret}`；为空时不显示跳转链接 |
-| `MANAGER_DASHBOARD_NAME` | `面板` | 跳转链接显示的名称 |
 
 mihomo 的 controller 地址和 secret 直接从 `config.yaml` 的 `external-controller` / `secret` 读取，无需另配。
 
@@ -228,7 +207,7 @@ mihomo 的 controller 地址和 secret 直接从 `config.yaml` 的 `external-con
 - **默认监听 `0.0.0.0:9092`，整个局域网都能访问。** 管理页以 root 运行，能修改配置、重启服务、下载并替换内核二进制，等同于这台机器的 root 权限。
 - **一定要设置强密码或 Token**（`manager.secret` / `MANAGER_PASSWORD`，或 `manager.token` / `MANAGER_TOKEN`）。两者都没有时管理页会**无认证运行**（启动日志会有 WARN）。
 - HTTP Basic 认证是明文传输的：只在可信内网使用；需要跨网络访问时，请改为 `MANAGER_LISTEN=127.0.0.1:9092`，再通过 Nginx / Caddy 等反向代理加 HTTPS（以及额外的访问控制），或通过 VPN / Tailscale 等访问。**不要直接暴露到公网。**
-- 内置面板由后端代为访问 controller，已登录管理页即可切换节点、断开连接、修改运行时配置，请把管理页密码视为与 controller secret 同等敏感。只有 `MANAGER_DASHBOARD_URL` 模板含 `{secret}` 时，状态接口才会把 secret 返回给浏览器。
+- 内置面板由后端代为访问 controller，已登录管理页即可切换节点、断开连接、修改运行时配置，请把管理页密码视为与 controller secret 同等敏感。controller secret 只在后端使用，不会返回给浏览器。
 - 使用 Nginx 等反向代理时，实时数据是长连接流式响应（已带 `X-Accel-Buffering: no`），请勿开启响应缓冲，读取超时不要低于 60 秒。
 - `subscription.url`、`manager.secret`、`manager.token`、`override.yaml`、`config.yaml`、`backup/` 都包含敏感信息，保持 `chmod 600/700`，不要提交到任何仓库（本仓库的 `.gitignore` 已排除）。
 - 内核更新只允许安装 `https://github.com/MetaCubeX/mihomo/releases/download/` 下的 `.gz` 资产。
