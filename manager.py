@@ -1499,10 +1499,8 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 .nd-m .u{border:1px solid var(--bd);border-radius:4px;padding:0 4px;line-height:14px}.nd-m .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .lat,.latv{background:none;border:0;padding:0 2px;font:600 11.5px var(--mono);color:var(--mut);white-space:nowrap;flex:none}.lat{cursor:pointer}.lat:hover{text-decoration:underline}
 .lat.g,.latv.g{color:var(--ok)}.lat.y,.latv.y{color:var(--warn)}.lat.r,.latv.r{color:var(--bad)}
-.pvs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
-.prv{background:var(--ink);border:1px solid var(--bd);border-left:3px solid var(--pur);border-radius:8px;padding:10px 12px;min-width:0}
-.prv-h{display:flex;align-items:center;gap:8px;margin-bottom:3px}.prv-h b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.prv .act{display:flex;gap:4px;margin-top:8px}
+.pv-use{padding:9px 14px 0;font-size:11.5px;color:var(--mut);cursor:pointer}.pv-use .bar{margin-top:6px}
+.pgc-f .ok-n{font:600 11.5px var(--mono);color:var(--mut);white-space:nowrap}.pgc-f .ok-n b{color:var(--ok);font-weight:600}
 .bar{height:5px;background:#21262d;border-radius:3px;overflow:hidden;margin-top:5px}.bar i{display:block;height:100%;background:var(--acc)}.bar i.warn{background:var(--warn)}.bar i.bad{background:var(--bad)}
 /* connections */
 /* 连接列表：随页面滚动、不横向滚动，列随宽度逐级收起 */
@@ -1698,18 +1696,19 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
    <span class="seg" id="px-view"><button data-v="groups" class="on">代理 <span id="px-ng">0</span></button><button data-v="providers">代理集合 <span id="px-np">0</span></button></span>
    <span class="seg modesw" title="代理模式"></span>
    <span class="search"><input type="search" id="pxq" placeholder="搜索节点 / 策略组" autocomplete="off"></span>
-   <span class="tbg px-g"><select id="pxsort"><option value="">默认顺序</option><option value="delay">按延迟</option><option value="name">按名称</option></select>
+   <span class="tbg"><select id="pxsort"><option value="">默认顺序</option><option value="delay">按延迟</option><option value="name">按名称</option></select>
    <label class="switch"><input type="checkbox" id="pxhide"><i></i>隐藏超时</label></span>
    <span class="sp"></span>
-   <span class="tbg px-g"><button class="btn" id="px-expand" onclick="pxExpandAll()">全部展开</button><button class="btn pri" id="px-testall" onclick="pxTestAll()">⚡ 全部测速</button></span>
-   <span class="tbg px-p" style="display:none"><button class="btn pri" onclick="pvUpdateAll(this)">↻ 全部更新</button></span>
+   <button class="btn" id="px-expand" onclick="pxExpandAll()">全部展开</button>
+   <span class="tbg px-g"><button class="btn pri" id="px-testall" onclick="pxTestAll()">⚡ 全部测速</button></span>
+   <span class="tbg px-p" style="display:none"><button class="btn" onclick="pvUpdateAll(this)">↻ 全部更新</button><button class="btn pri" onclick="pvCheckAll(this)">⚡ 全部健康检查</button></span>
    <button class="btn" onclick="loadProxies()">↻ 刷新</button>
   </div>
   <details class="px-g" style="margin:0 0 10px"><summary>测速与切换设置</summary>
    <div class="row"><span class="mut" style="font-size:12px">测速地址</span><input type="text" id="px-url" style="max-width:340px" spellcheck="false"><span class="mut" style="font-size:12px">超时 ms</span><input type="number" id="px-to" min="500" max="30000" step="500" style="width:100px">
     <label class="switch"><input type="checkbox" id="px-autoclose"><i></i>切换节点后断开该组的旧连接</label><button class="btn sm" onclick="pxSaveSet()">保存</button></div></details>
   <div class="pxg px-g" id="px"><div class="empty">加载中…</div></div>
-  <div class="pvs px-p" id="pvs" style="display:none"></div>
+  <div class="pxg px-p" id="pvs" style="display:none"></div>
  </div>
 </section>
 <section class="tab" id="t-conns">
@@ -1830,7 +1829,7 @@ function toast(m,bad){const t=$('#toast');t.textContent=m;t.className=bad?'bad':
 function busy(on){document.querySelectorAll('button.btn').forEach(b=>b.disabled=on)}
 function fmtDiff(d){return d.split('\n').map(l=>{const c=l.startsWith('+')?'b':l.startsWith('-')?'a':l.startsWith('@@')?'h':'';return c?`<span class="${c}">${esc(l)}</span>`:esc(l)}).join('\n')}
 function diffStat(d){if(!d)return'';let a=0,b=0;for(const l of d.split('\n')){if(l.startsWith('+')&&!l.startsWith('+++'))b++;else if(l.startsWith('-')&&!l.startsWith('---'))a++}return`<span class="ok">+${b}</span> <span class="bad">−${a}</span>`}
-function fmtBytes(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':(n/1048576).toFixed(2)+' MB'}
+function fmtBytes(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':n<1073741824?(n/1048576).toFixed(2)+' MB':n<1099511627776?(n/1073741824).toFixed(2)+' GB':(n/1099511627776).toFixed(2)+' TB'}
 function fmtDur(ms){if(ms<0||isNaN(ms))return'-';const s=Math.floor(ms/1000),d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d} 天 ${h} 小时`:h?`${h} 小时 ${m} 分`:m?`${m} 分钟`:`${s} 秒`}
 function rel(epoch){const ms=Date.now()-epoch*1000;return ms<60000?'刚刚':fmtDur(ms)+'前'}
 function parseTs(t){const m=/(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/.exec(t||'');return m?new Date(m[1]+'T'+m[2]):null}
@@ -2023,7 +2022,7 @@ window.addEventListener('resize',()=>requestAnimationFrame(liveCharts));
 /* ---------- 代理 ---------- */
 const PGT={Selector:['acc','手动'],URLTest:['cyan','自动测速'],Fallback:['warn','故障转移'],LoadBalance:['pur','负载均衡'],Relay:['','链式']};
 const SELECTABLE=new Set(['Selector','URLTest','Fallback']);
-const PXS={url:localStorage.getItem('px-url')||'https://www.gstatic.com/generate_204',to:+localStorage.getItem('px-to')||5000,autoclose:localStorage.getItem('px-autoclose')==='1',open:new Set(JSON.parse(localStorage.getItem('px-open')||'[]'))};
+const PXS={url:localStorage.getItem('px-url')||'https://www.gstatic.com/generate_204',to:+localStorage.getItem('px-to')||5000,autoclose:localStorage.getItem('px-autoclose')==='1',open:new Set(JSON.parse(localStorage.getItem('px-open')||'[]')),popen:new Set(JSON.parse(localStorage.getItem('pv-open')||'[]'))};
 let PX={proxies:{},providers:{}};const LAT={},TESTING=new Set();
 function isGroup(p){return !!(p&&Array.isArray(p.all))}
 function lat(n,d=0){if(/^(REJECT|REJECT-DROP|PASS|COMPATIBLE)$/.test(n))return undefined;if(LAT[n]!==undefined)return LAT[n];const p=PX.proxies[n];if(!p)return undefined;if(isGroup(p)&&p.now&&d<6)return lat(p.now,d+1);
@@ -2062,16 +2061,16 @@ function pxView(v){PXS.view=v;$('#px-view').querySelectorAll('button').forEach(b
 $('#px-view').addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(b)pxView(b.dataset.v)});
 function pxSaveOpen(){localStorage.setItem('px-open',JSON.stringify([...PXS.open]))}
 function pxToggle(g){PXS.open.has(g)?PXS.open.delete(g):PXS.open.add(g);pxSaveOpen();renderProxies()}
-function pxExpandAll(){const gs=pxGroups();if(gs.every(g=>PXS.open.has(g.name)))PXS.open.clear();else gs.forEach(g=>PXS.open.add(g.name));pxSaveOpen();renderProxies()}
+function pxExpandAll(){if(PXS.view==='providers'){const l=pvList();if(l.every(p=>PXS.popen.has(p.name)))PXS.popen.clear();else l.forEach(p=>PXS.popen.add(p.name));localStorage.setItem('pv-open',JSON.stringify([...PXS.popen]));renderProviders();return}const gs=pxGroups();if(gs.every(g=>PXS.open.has(g.name)))PXS.open.clear();else gs.forEach(g=>PXS.open.add(g.name));pxSaveOpen();renderProxies()}
 $('#px').addEventListener('click',e=>{const card=e.target.closest('.pgc');if(!card)return;const g=card.dataset.g;
  const lb=e.target.closest('.lat');if(lb){pxTestOne(lb.dataset.n);return}
  const a=e.target.closest('[data-act]');if(a&&a.dataset.act==='gtest'){pxTestGroup(g);return}
  const nd=e.target.closest('.nd');if(nd){if(nd.classList.contains('sel'))pxSelect(g,nd.dataset.n);return}
  if(a&&a.dataset.act==='toggle')pxToggle(g)});
-['pxsort','pxhide'].forEach(id=>$('#'+id).addEventListener('change',renderProxies));$('#pxq').addEventListener('input',()=>PXS.view==='providers'?renderProviders():renderProxies());
+['pxsort','pxhide'].forEach(id=>$('#'+id).addEventListener('change',()=>pxRender()));$('#pxq').addEventListener('input',()=>pxRender());
 /* 订阅（proxy-providers）里的节点不一定出现在 /proxies 中，合并进来才有类型 / UDP / 延迟历史 */
 function pxMerge(p,pv){const P=Object.assign({},p.proxies||{});Object.values(pv.providers||{}).forEach(v=>(v.proxies||[]).forEach(x=>{if(x&&x.name&&!P[x.name])P[x.name]=x}));return P}
-async function pxRefresh(){try{const [p,pv]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}}))]);PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{}}catch(e){}renderProxies()}
+async function pxRefresh(){try{const [p,pv]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}}))]);PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{}}catch(e){}pxRender();renderProviders()}
 async function loadProxies(){cnTimer();$('#px-url').value=PXS.url;$('#px-to').value=PXS.to;$('#px-autoclose').checked=PXS.autoclose;
  try{const [p,pv,c]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}})),mh('/configs').catch(()=>null)]);
   PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{};if(c){MODE=String(c.mode||'');renderModeSw()}pxView(PXS.view||'groups');renderProviders()}
@@ -2082,8 +2081,8 @@ async function pxSelect(g,n){const grp=PX.proxies[g];if(!grp||grp.now===n)return
  try{await mh('/proxies/'+enc(g),'PUT',{name:n});grp.now=n;renderProxies();toast(`${g} → ${n}`);
   if(PXS.autoclose){const s=await mh('/connections');const ids=(s.connections||[]).filter(c=>(c.chains||[]).includes(g)&&!(c.chains||[]).includes(n)).map(c=>c.id);await Promise.all(ids.map(id=>mh('/connections/'+enc(id),'DELETE').catch(()=>{})));if(ids.length)toast(`${g} → ${n}，已断开 ${ids.length} 个旧连接`)}
   pxRefresh()}catch(e){toast(e.message,1)}}
-async function pxTestOne(n){if(!n||TESTING.has(n))return;TESTING.add(n);renderProxies();
- try{const r=await mh(`/proxies/${enc(n)}/delay?url=${enc(PXS.url)}&timeout=${PXS.to}`);LAT[n]=r.delay||0}catch(e){LAT[n]=0}finally{TESTING.delete(n);renderProxies()}}
+async function pxTestOne(n){if(!n||TESTING.has(n))return;TESTING.add(n);pxRender();
+ try{const r=await mh(`/proxies/${enc(n)}/delay?url=${enc(PXS.url)}&timeout=${PXS.to}`);LAT[n]=r.delay||0}catch(e){LAT[n]=0}finally{TESTING.delete(n);pxRender()}}
 async function pxTestGroup(name,quiet){const g=PX.proxies[name];if(!g||TESTING.has('g:'+name))return;const all=g.all||[];TESTING.add('g:'+name);all.forEach(n=>TESTING.add(n));if(!quiet)renderProxies();
  try{const r=await mh(`/group/${enc(name)}/delay?url=${enc(PXS.url)}&timeout=${PXS.to}`);all.forEach(n=>{LAT[n]=r[n]||0})}
  catch(e){all.forEach(n=>{LAT[n]=0});if(!quiet)toast(`${name} 测速失败：${e.message}`,1)}
@@ -2092,15 +2091,34 @@ async function pxTestAll(){const b=$('#px-testall');const names=pxGroups().filte
  await btnBusy(b,async()=>{names.forEach(n=>{TESTING.add('g:'+n);(PX.proxies[n].all||[]).forEach(x=>TESTING.add(x))});renderProxies();
   let i=0;const worker=async()=>{while(i<names.length){const n=names[i++];TESTING.delete('g:'+n);await pxTestGroup(n,true);renderProxies()}};
   await Promise.all([worker(),worker(),worker()]);TESTING.clear();await pxRefresh();toast(`已测速 ${names.length} 个策略组`)})}
-function renderProviders(){const all=Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible');$('#px-np').textContent=all.length;const q=$('#pxq').value.trim().toLowerCase();
- const list=q?all.filter(p=>p.name.toLowerCase().includes(q)||(p.proxies||[]).some(x=>String(x.name).toLowerCase().includes(q))):all;if(PXS.view==='providers'&&!list.length){$('#pvs').innerHTML=`<div class="empty" style="grid-column:1/-1">${q?'没有匹配的代理集合':'没有代理集合（proxy-providers）'}</div>`;return}
- $('#pvs').innerHTML=list.map(p=>{const si=p.subscriptionInfo;let sub='';if(si&&(si.Total||si.Download||si.Upload)){const used=(si.Upload||0)+(si.Download||0),tot=si.Total||0,pct=tot?Math.min(100,used/tot*100):0;
-   sub=`<div class="mut" style="font-size:11.5px;margin-top:6px">已用 ${fmtBytes(used)} / ${tot?fmtBytes(tot):'不限'}${tot?` (${pct.toFixed(1)}%)`:''}${si.Expire?` · 到期 ${new Date(si.Expire*1000).toLocaleDateString('zh-CN')}`:''}</div>${tot?`<div class="bar"><i class="${pct>90?'bad':pct>70?'warn':''}" style="width:${pct.toFixed(1)}%"></i></div>`:''}`}
-  const ps=p.proxies||[];const ok=ps.filter(x=>{const h=x.history||[];return h.length&&h[h.length-1].delay>0}).length;
-  return `<div class="prv" data-p="${attr(p.name)}"><div class="prv-h"><b title="${attr(p.name)}">${esc(p.name)}</b><span class="tag">${esc(p.vehicleType)}</span><span class="sp"></span><span class="mut" style="font-size:12px">${ps.length} 个节点${ok?` · <span class="ok">${ok} 可用</span>`:''}</span></div>
-   <div class="mut" style="font-size:11.5px">更新于 ${fmtUpd(p.updatedAt)}</div>${sub}<div class="act"><button class="btn sm" data-act="up">↻ 更新</button><button class="btn sm" data-act="hc">⚡ 健康检查</button></div></div>`}).join('')}
-$('#pvs').addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;const n=b.closest('.prv').dataset.p;
- await btnBusy(b,async()=>{try{if(b.dataset.act==='up'){await mh('/providers/proxies/'+enc(n),'PUT');toast(`${n} 已更新`)}else{await mh(`/providers/proxies/${enc(n)}/healthcheck`);toast(`${n} 健康检查完成`)}}catch(ex){toast(`${n}：${ex.message}`,1)}});loadProxies()});
+const REFRESH='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>';
+function pxRender(){PXS.view==='providers'?renderProviders():renderProxies()}
+function pvList(){return Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible')}
+function renderProviders(){const all=pvList();$('#px-np').textContent=all.length;if(PXS.view!=='providers')return;const q=$('#pxq').value.trim().toLowerCase();
+ const html=all.map(p=>{let ns=(p.proxies||[]).map(x=>x.name);if(q&&!p.name.toLowerCase().includes(q))ns=ns.filter(n=>String(n).toLowerCase().includes(q));if(q&&!ns.length&&!p.name.toLowerCase().includes(q))return'';
+  if($('#pxhide').checked)ns=ns.filter(n=>lat(n)!==0);const srt=$('#pxsort').value;if(srt==='name')ns.sort((a,b)=>a.localeCompare(b,'zh'));else if(srt==='delay'){const k=n=>{const d=lat(n);return d>0?d:d===0?1e9:1e8};ns.sort((a,b)=>k(a)-k(b))}
+  const total=(p.proxies||[]).length,ok=(p.proxies||[]).filter(x=>lat(x.name)>0).length,open=PXS.popen.has(p.name)||!!q,busy=TESTING.has('p:'+p.name);
+  const si=p.subscriptionInfo;let use='';if(si&&(si.Total||si.Download||si.Upload)){const used=(si.Upload||0)+(si.Download||0),tot=si.Total||0,pct=tot?Math.min(100,used/tot*100):0;
+   use=`<div class="pv-use" data-act="toggle">已用 ${fmtBytes(used)} / ${tot?fmtBytes(tot):'不限'}${tot?` (${pct.toFixed(1)}%)`:''}${si.Expire?` · 到期 ${new Date(si.Expire*1000).toLocaleDateString('zh-CN')}`:''}${tot?`<div class="bar"><i class="${pct>90?'bad':pct>70?'warn':''}" style="width:${pct.toFixed(1)}%"></i></div>`:''}</div>`}
+  return `<div class="pgc ${open?'open':''}" data-p="${attr(p.name)}"><div class="pgc-h" data-act="toggle">${gIcon({name:p.name})}<b title="${attr(p.name)}">${esc(p.name)}</b><span class="cnt">${total}</span><span class="sp"></span>
+   <button class="pgc-t" data-act="up" title="更新订阅">${TESTING.has('u:'+p.name)?'<span class="spin"></span>':REFRESH}</button><button class="pgc-t" data-act="hc" title="健康检查（测速全部节点）">${busy?'<span class="spin"></span>':GAUGE}</button></div>
+   <div class="pgc-b" data-act="toggle"><div class="pgc-tags"><span class="gpill Selector" title="更新于 ${attr(fmtUpd(p.updatedAt))}">${esc(p.vehicleType)}<i>›</i><span class="nm">${(()=>{const d=new Date(p.updatedAt||0);return isNaN(d)||d.getFullYear()<2000?'未更新':rel(d.getTime()/1000)+'更新'})()}</span></span></div>${CHEV}</div>${use}
+   <div class="pgc-f" data-act="toggle">${ns.length>10?latBar(ns):`<span class="dots">${ns.map(n=>`<i class="${latCls(lat(n))}" title="${attr(n)} · ${latTxt(lat(n))}"></i>`).join('')}</span>`}<span class="ok-n"><b>${ok}</b> / ${total} 可用</span></div>
+   ${open?`<div class="nds">${ns.map(n=>ndHtml({now:null,type:'Provider'},n)).join('')||'<span class="mut" style="font-size:12px">无匹配节点</span>'}</div>`:''}</div>`}).join('');
+ $('#pvs').innerHTML=html||`<div class="empty" style="grid-column:1/-1">${q?'没有匹配的代理集合':'没有代理集合（proxy-providers）'}</div>`;
+ $('#px-expand').textContent=all.length&&all.every(p=>PXS.popen.has(p.name))?'全部折叠':'全部展开'}
+$('#pvs').addEventListener('click',async e=>{const card=e.target.closest('.pgc');if(!card)return;const n=card.dataset.p;
+ const lb=e.target.closest('.lat');if(lb){pxTestOne(lb.dataset.n);return}
+ const a=e.target.closest('[data-act]');if(!a)return;const act=a.dataset.act;
+ if(act==='toggle'){if(e.target.closest('.nd'))return;PXS.popen.has(n)?PXS.popen.delete(n):PXS.popen.add(n);localStorage.setItem('pv-open',JSON.stringify([...PXS.popen]));renderProviders();return}
+ const pv=PX.providers[n];if(!pv)return;const names=(pv.proxies||[]).map(x=>x.name);
+ if(act==='up'){if(TESTING.has('u:'+n))return;TESTING.add('u:'+n);renderProviders();try{await mh('/providers/proxies/'+enc(n),'PUT');toast(`${n} 已更新`)}catch(ex){toast(`${n}：${ex.message}`,1)}finally{TESTING.delete('u:'+n)}}
+ else if(act==='hc'){if(TESTING.has('p:'+n))return;TESTING.add('p:'+n);names.forEach(x=>TESTING.add(x));renderProviders();
+  try{await mh(`/providers/proxies/${enc(n)}/healthcheck`);names.forEach(x=>delete LAT[x]);toast(`${n} 健康检查完成`)}catch(ex){toast(`${n}：${ex.message}`,1)}finally{TESTING.delete('p:'+n);names.forEach(x=>TESTING.delete(x))}}
+ await pxRefresh()});
+async function pvCheckAll(b){const l=pvList();if(!l.length)return;await btnBusy(b,async()=>{l.forEach(p=>{TESTING.add('p:'+p.name);(p.proxies||[]).forEach(x=>TESTING.add(x.name))});renderProviders();
+ const r=await Promise.allSettled(l.map(p=>mh(`/providers/proxies/${enc(p.name)}/healthcheck`)));l.forEach(p=>(p.proxies||[]).forEach(x=>delete LAT[x.name]));TESTING.clear();
+ const bad=r.filter(x=>x.status==='rejected').length;toast(bad?`${bad} 个代理集合健康检查失败`:`已检查 ${l.length} 个代理集合`,!!bad)});await pxRefresh()}
 async function pvUpdateAll(b){const names=Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible').map(p=>p.name);
  await btnBusy(b,async()=>{const r=await Promise.allSettled(names.map(n=>mh('/providers/proxies/'+enc(n),'PUT')));const bad=r.filter(x=>x.status==='rejected').length;toast(bad?`${bad} 个代理集合更新失败`:`已更新 ${names.length} 个代理集合`,!!bad)});loadProxies()}
 
