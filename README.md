@@ -1,10 +1,10 @@
 # mihomo-keeper
 
-一个给 Linux 服务器上的 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta 内核）用的轻量运维管理页：
-**订阅更新 + 本地 override 合并、规则增删、配置备份回滚、服务控制、日志、内核与 GeoIP 数据库更新**，都在一个网页里完成。
+一个给 Linux 服务器上的 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta 内核）用的轻量管理页：
+**内置面板（实时流量、节点切换与测速、连接、规则、实时日志、内核设置）+ 订阅更新与本地 override 合并、规则增删、配置备份回滚、服务控制、内核与 GeoIP 数据库更新**，都在一个网页里完成。
 
 - 单文件后端：`manager.py`，只依赖 Python 3.8+ 标准库和 PyYAML，没有前端构建步骤
-- 不替代 mihomo 面板：节点测速、连接查看等日常操作仍然交给 [metacubexd](https://github.com/MetaCubeX/metacubexd) 等面板，本项目只管「配置和运维」
+- 内置 [metacubexd](https://github.com/MetaCubeX/metacubexd) 的日常面板功能，不必再单独部署或跳转到外部面板；浏览器只和管理页通信，controller secret 不会下发到浏览器
 - 面向 systemd 部署的单机场景（家用旁路由、小主机、VPS）
 
 [English](README.en.md)
@@ -25,14 +25,19 @@
 
 | 页面 | 能做什么 |
 | --- | --- |
-| 状态 | mihomo 服务状态、内核版本、配置/override 修改时间、备份数量、订阅地址（脱敏显示），一键更新订阅、重载 / 重启 / 校验配置，可选跳转到外部面板（metacubexd 等，需配置 `MANAGER_DASHBOARD_URL`） |
-| 规则 | 表单方式编辑 override 中的 `rules-prepend` / `rules-append`，策略组和规则集自动补全，格式校验；保存时只替换对应 YAML 块，保留其他注释 |
-| 策略组 | 查看并切换 Selector / URLTest / Fallback 等策略组当前选择（通过 mihomo external-controller） |
+| 概览 | mihomo 服务状态、内核版本、配置/override 修改时间、备份数量、订阅地址（脱敏显示）；**实时**上下行速度、累计流量、活动连接数、内存占用及 60 秒曲线，代理模式（规则 / 全局 / 直连）切换；一键更新订阅、重载 / 重启 / 校验配置 |
+| 代理 | 按策略组展示节点，点击切换（Selector，以及 URLTest / Fallback 的固定选择）；单节点 / 整组 / 全部测速，延迟着色；搜索、按延迟或名称排序、隐藏超时节点；可自定义测速地址 / 超时，可选切换后断开旧连接；代理集合（proxy-providers）显示订阅流量 / 到期时间，支持更新和健康检查 |
+| 连接 | 活动连接实时列表（主机、类型、规则、链路、实时速度、流量、来源、进程、时长），排序、过滤、暂停，查看详情，断开单个 / 筛选结果 / 全部连接，查看已关闭的连接 |
+| 规则 | 运行中内核的生效规则（可过滤），规则集（rule-providers）列表与更新 |
+| 日志 | **实时日志**：内核日志流，可选级别、过滤高亮、暂停；**systemd 日志**：`journalctl -u mihomo`，关键字过滤高亮，自动刷新 |
+| 自定义规则 | 表单方式编辑 override 中的 `rules-prepend` / `rules-append`，策略组和规则集自动补全，格式校验；保存时只替换对应 YAML 块，保留其他注释 |
+| 内核设置 | 运行时修改代理模式、日志级别、各类端口、允许局域网、IPv6、域名嗅探、TCP 并发、TUN 开关与协议栈、出口网卡；清空 FakeIP / DNS 缓存；DNS 查询。（热重载 / 更新订阅 / 重启后恢复为 config.yaml 的值） |
 | override | 在线编辑 `override.yaml`；「校验」会下载订阅 → 合并 → `mihomo -t`，并给出与当前 config.yaml 的 diff，不落盘；保存时自动保留最近 10 份 override 备份，可选立即应用 |
 | config | 只读查看当前生效的 `config.yaml`，支持过滤 |
 | 更新 | **内核**：从 MetaCubeX/mihomo GitHub Release 列出版本，按 CPU 微架构（amd64 v1/v2/v3）推荐变体，下载 → `-v` / `-t` 校验 → 备份旧内核 → 替换 → 重启，失败自动回滚；可回滚到旧内核。**GeoIP / ASN 数据库**：从 MetaCubeX/meta-rules-dat（或 config 中的 `geox-url`）更新 `geoip.metadb` / `ASN.mmdb`（以及存在时的 `geosite.dat` / `geoip.dat`），校验 MMDB 元数据，保留 `.bak` 可回滚 |
 | 备份 | 列出 `backup/config.yaml.*`，与当前配置 diff、校验后回滚（回滚前会再备份当前配置）、批量删除 |
-| 日志 | `journalctl -u mihomo` 实时查看，关键字过滤高亮，自动刷新 |
+
+面板类功能都经管理页后端转发到 mihomo external-controller（`/api/mihomo/*`，实时数据为 NDJSON 流），沿用管理页的认证，由后端带上 controller secret。只放行面板需要的接口（不含 `/restart`、`/upgrade`、`/debug`）。因此 `external-controller` 可以只监听 `127.0.0.1`，也不再需要 `external-ui`。
 
 GitHub 直连下载失败时，内核 / 数据库下载会自动改走本机 mihomo 的 `mixed-port` 代理重试一次。
 
@@ -81,7 +86,7 @@ GitHub 直连下载失败时，内核 / 数据库下载会自动改走本机 mih
 ├── manager.token        # 管理页自动登录 Token（chmod 600）
 ├── backup/              # config.yaml 历史备份
 ├── geoip.metadb / ASN.mmdb ...
-└── ui/                  # 可选：metacubexd 面板
+└── ui/                  # 可选：外部面板（管理页已内置面板功能，通常不需要）
 ```
 
 ## 安装
@@ -141,9 +146,9 @@ MIHOMO_DIR=/tmp/mk MANAGER_LISTEN=127.0.0.1:9092 MANAGER_PASSWORD=test python3 m
 # 打开 http://127.0.0.1:9092 （admin / test）；依赖 systemctl / mihomo 的功能会报错，属正常
 ```
 
-### 搭配 metacubexd 面板
+### 外部面板（可选）
 
-`ui/` 不包含在本仓库中。如需面板：
+管理页已内置代理、连接、规则、实时日志等面板功能，一般不再需要 metacubexd。仍想同时使用外部面板时（`ui/` 不包含在本仓库中）：
 
 1. 下载 [metacubexd](https://github.com/MetaCubeX/metacubexd/releases) 的构建产物（`compressed-dist.tgz`），解压到 `/etc/mihomo/ui`
 2. 在 `override.yaml` 中设置 `external-controller`、`secret`、`external-ui: ui`
@@ -223,7 +228,8 @@ mihomo 的 controller 地址和 secret 直接从 `config.yaml` 的 `external-con
 - **默认监听 `0.0.0.0:9092`，整个局域网都能访问。** 管理页以 root 运行，能修改配置、重启服务、下载并替换内核二进制，等同于这台机器的 root 权限。
 - **一定要设置强密码或 Token**（`manager.secret` / `MANAGER_PASSWORD`，或 `manager.token` / `MANAGER_TOKEN`）。两者都没有时管理页会**无认证运行**（启动日志会有 WARN）。
 - HTTP Basic 认证是明文传输的：只在可信内网使用；需要跨网络访问时，请改为 `MANAGER_LISTEN=127.0.0.1:9092`，再通过 Nginx / Caddy 等反向代理加 HTTPS（以及额外的访问控制），或通过 VPN / Tailscale 等访问。**不要直接暴露到公网。**
-- 状态接口会把 mihomo controller 的 `secret` 返回给已登录的页面（用于一键打开面板），请把管理页密码视为与 controller secret 同等敏感。
+- 内置面板由后端代为访问 controller，已登录管理页即可切换节点、断开连接、修改运行时配置，请把管理页密码视为与 controller secret 同等敏感。只有 `MANAGER_DASHBOARD_URL` 模板含 `{secret}` 时，状态接口才会把 secret 返回给浏览器。
+- 使用 Nginx 等反向代理时，实时数据是长连接流式响应（已带 `X-Accel-Buffering: no`），请勿开启响应缓冲，读取超时不要低于 60 秒。
 - `subscription.url`、`manager.secret`、`manager.token`、`override.yaml`、`config.yaml`、`backup/` 都包含敏感信息，保持 `chmod 600/700`，不要提交到任何仓库（本仓库的 `.gitignore` 已排除）。
 - 内核更新只允许安装 `https://github.com/MetaCubeX/mihomo/releases/download/` 下的 `.gz` 资产。
 

@@ -1,24 +1,29 @@
 # mihomo-keeper
 
-A lightweight web console for operating [mihomo](https://github.com/MetaCubeX/mihomo) (Clash.Meta core) on a Linux server with systemd:
-**subscription update + local override merge, rule editing, config backup/rollback, service control, logs, kernel and GeoIP database updates.**
+A lightweight web console for [mihomo](https://github.com/MetaCubeX/mihomo) (Clash.Meta core) on a Linux server with systemd:
+**a built-in dashboard (live traffic, proxy switching and latency tests, connections, rules, live logs, core settings) plus subscription update + local override merge, rule editing, config backup/rollback, service control, kernel and GeoIP database updates.**
 
 - Single-file backend (`manager.py`): Python 3.8+ standard library + PyYAML, no frontend build step
-- Complements (does not replace) dashboards such as [metacubexd](https://github.com/MetaCubeX/metacubexd)
+- Built-in equivalent of the everyday [metacubexd](https://github.com/MetaCubeX/metacubexd) dashboard features, so no separate dashboard is needed; the browser only talks to the manager and never sees the controller secret
 - The UI is in Chinese
 
 [中文说明](README.md)
 
 ## Features
 
-- **Status**: service state, kernel version, config/override mtime, backup count, masked subscription URL; update subscription, hot reload / restart / validate config; optional link to an external dashboard such as metacubexd (`MANAGER_DASHBOARD_URL`)
-- **Rules**: form editor for `rules-prepend` / `rules-append` in `override.yaml`, with validation; only the relevant YAML block is rewritten so comments are kept
-- **Proxy groups**: view and switch selectors via the mihomo external controller
+- **Overview**: service state, kernel version, config/override mtime, backup count, masked subscription URL; live upload/download speed, totals, active connections, memory and 60-second charts; proxy mode switch (rule / global / direct); update subscription, hot reload / restart / validate config
+- **Proxies**: groups with their nodes, click to switch (Selector, plus fixed selection for URLTest / Fallback); per-node, per-group and test-all latency checks with colour coding; search, sort by latency or name, hide timed-out nodes; configurable test URL / timeout, optional closing of old connections after switching; proxy providers with subscription usage / expiry, update and health check
+- **Connections**: live table (host, type, rule, chain, speed, traffic, source, process, duration) with sorting, filtering, pause, details, closing one / filtered / all connections, and recently closed connections
+- **Rules**: effective rules of the running core (filterable) and rule providers with update
+- **Logs**: live core log stream with level selection, filter highlighting and pause; `journalctl -u mihomo` viewer with filtering and auto refresh
+- **Custom rules**: form editor for `rules-prepend` / `rules-append` in `override.yaml`, with validation; only the relevant YAML block is rewritten so comments are kept
+- **Core settings**: runtime changes to mode, log level, ports, allow-lan, IPv6, sniffing, TCP concurrency, TUN enable / stack, outbound interface; flush FakeIP / DNS cache; DNS lookup (values revert to `config.yaml` on reload / subscription update / restart)
 - **override**: edit `override.yaml`; "validate" downloads the subscription, merges, runs `mihomo -t` and shows a diff against the current `config.yaml` without writing anything
 - **config**: read-only view of the effective `config.yaml`
 - **Update**: install mihomo releases from GitHub (picks the amd64 v1/v2/v3 variant from CPU flags, validates, backs up, restarts, auto-rollback on failure); update `geoip.metadb` / `ASN.mmdb` from MetaCubeX/meta-rules-dat with rollback
 - **Backups**: diff, validated restore and deletion of `backup/config.yaml.*`
-- **Logs**: `journalctl -u mihomo` viewer with filtering and auto refresh
+
+Dashboard features go through the manager backend to the mihomo external controller (`/api/mihomo/*`, live data as NDJSON streams), using the manager's authentication; the backend adds the controller secret. Only the endpoints the dashboard needs are allowed (no `/restart`, `/upgrade`, `/debug`). The `external-controller` can therefore listen on `127.0.0.1` only, and `external-ui` is no longer needed.
 
 Merge semantics of `merge-config.py` (deep merge, glob-patched `proxy-groups`, `rules-prepend` / `rules-append` / `rules-insert`, `null` deletes a key, `x-*` keys are local) are documented in [README.md](README.md) and [`override.example.yaml`](override.example.yaml).
 
@@ -56,7 +61,7 @@ This matters on hosts that run `tun`. `systemctl restart` destroys and recreates
 
 If the reload cannot be done (controller unreachable, service not running, …) the script falls back to `systemctl restart`, and logs which of the two actually applied the config. Set `MIHOMO_APPLY_MODE=restart` to keep the previous behaviour.
 
-The dashboard link in the header is hidden unless `MANAGER_DASHBOARD_URL` is set. It is a template supporting `{host}` (hostname used by the browser), `{port}` (controller port) and `{secret}` (controller secret), all URL-encoded, e.g.
+An optional external dashboard link in the header is hidden unless `MANAGER_DASHBOARD_URL` is set. It is a template supporting `{host}` (hostname used by the browser), `{port}` (controller port) and `{secret}` (controller secret), all URL-encoded, e.g.
 `MANAGER_DASHBOARD_URL='http://{host}:{port}/ui/#/setup?hostname={host}&port={port}&secret={secret}'`.
 If the template contains `{secret}`, the secret is sent to the (authenticated) browser.
 
@@ -67,6 +72,8 @@ Token settings: `MANAGER_TOKEN` (takes precedence over the file), `MANAGER_TOKEN
 - It listens on `0.0.0.0:9092` by default and runs as root (it can rewrite configs, restart services and replace the mihomo binary). **Always set a strong password or token**; without either it runs **without authentication**.
 - HTTP Basic auth is not encrypted. Use it only on a trusted LAN, or bind to `127.0.0.1` and put it behind a TLS reverse proxy / VPN. Never expose it directly to the Internet.
 - Keep `subscription.url`, `manager.secret`, `manager.token`, `override.yaml`, `config.yaml` and `backup/` private.
+- A logged-in manager session can switch proxies, close connections and change runtime settings through the built-in dashboard; treat the manager password as sensitive as the controller secret.
+- Behind Nginx or another reverse proxy, live data uses long-lived streaming responses (sent with `X-Accel-Buffering: no`); do not enable response buffering and keep read timeouts at 60 seconds or more.
 
 ## License
 

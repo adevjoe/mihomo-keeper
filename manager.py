@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mihomo-keeper: mihomo 运维管理页：订阅更新 / override 编辑 / 备份回滚 / 服务控制 / 日志。
+"""mihomo-keeper: mihomo 管理页：内置面板（流量 / 代理 / 连接 / 规则 / 实时日志） + 订阅更新 / override 编辑 / 备份回滚 / 服务控制 / 日志。
 
 零依赖，仅 Python 标准库 + PyYAML（merge-config.py 已依赖）。
 认证：HTTP Basic 或专用 Token。Token 支持链接自动登录（HttpOnly 会话 Cookie）和 Bearer API 认证。
@@ -14,6 +14,7 @@ import gzip
 import json
 import os
 import platform
+import queue
 import re
 import secrets
 import shutil
@@ -24,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -87,31 +89,50 @@ def load_token():
     return ""
 
 
+_META_CACHE = {"key": None, "val": (None, "")}
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+# 访问本机 controller 时不走 http_proxy 等环境变量里的代理
+_CTRL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def cfg_meta():
-    """从 config.yaml 读 external-controller / secret。"""
+    """从 config.yaml 读 external-controller / secret（按 mtime 缓存：内置面板会频繁调用）。"""
     try:
-        cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+        st = CONFIG_FILE.stat()
+        key = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None, ""
+    if _META_CACHE["key"] == key:
+        return _META_CACHE["val"]
+    try:
+        cfg = yaml.load(CONFIG_FILE.read_text(encoding="utf-8"), Loader=_YAML_LOADER) or {}
     except Exception:
         return None, ""
     ec = str(cfg.get("external-controller") or "127.0.0.1:9090")
     host, port = ec.rsplit(":", 1)
     if host in ("0.0.0.0", "*", "::", "[::]", ""):
         host = "127.0.0.1"
-    return f"http://{host}:{port}", str(cfg.get("secret") or "")
+    val = (f"http://{host}:{port}", str(cfg.get("secret") or ""))
+    _META_CACHE.update(key=key, val=val)
+    return val
 
 
-def controller(method, path, body=None, timeout=5):
+def ctrl_open(method, path, data=None, timeout=5):
+    """向 mihomo controller 发请求，返回响应对象（调用方负责关闭）；非 2xx 抛 urllib.error.HTTPError。"""
     base, secret = cfg_meta()
     if not base:
         raise RuntimeError("cannot read config.yaml")
-    req = urllib.request.Request(base + path, method=method)
+    req = urllib.request.Request(base + path, data=data, method=method)
     if secret:
         req.add_header("Authorization", f"Bearer {secret}")
-    data = None
-    if body is not None:
-        data = json.dumps(body).encode()
+    if data is not None:
         req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, data=data, timeout=timeout) as r:
+    return _CTRL_OPENER.open(req, timeout=timeout)
+
+
+def controller(method, path, body=None, timeout=5):
+    data = json.dumps(body).encode() if body is not None else None
+    with ctrl_open(method, path, data, timeout) as r:
         raw = r.read()
         return json.loads(raw) if raw else {}
 
@@ -904,6 +925,22 @@ def api_proxies():
     return {"groups": groups}
 
 
+# ---------- 内置面板：mihomo controller 反向代理 ----------
+# 浏览器只和管理页通信（沿用管理页认证），由后端带上 controller secret 转发，
+# 所以 secret 不会下发给浏览器，controller 也可以只监听 127.0.0.1。
+CTRL_PREFIX = "/api/mihomo"
+CTRL_ALLOWED = re.compile(
+    r"/(?:version|configs|proxies|group|providers|rules|connections|traffic|memory|logs|cache|dns)(?:/[^?#]*)?")
+CTRL_STREAMS = {"/traffic", "/memory", "/logs"}  # controller 以 NDJSON 持续推送的接口
+CTRL_MAX_BODY = 1 << 20
+CTRL_STREAM_IDLE = 60  # 流式接口上游空闲超时（秒）；超时后结束本次响应，前端自动重连
+
+
+def ctrl_path_ok(path):
+    return bool(CTRL_ALLOWED.fullmatch(path)) and \
+        not re.search(r"(^|/)\.{1,2}(/|$)", urllib.parse.unquote(path))
+
+
 # ---------- HTTP ----------
 class Handler(BaseHTTPRequestHandler):
     server_version = "mihomo-manager/1.0"
@@ -1001,6 +1038,132 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _raw(self, code, body, ctype="application/json"):
+        self.send_response(code)
+        if code in (204, 304):
+            self.end_headers()
+            return
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _stream_headers(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("X-Accel-Buffering", "no")  # 让 Nginx 等反向代理不要缓冲
+        self.end_headers()
+        self.close_connection = True
+
+    def _ctrl_proxy(self, method):
+        """/api/mihomo/<controller 路径> → mihomo external-controller。"""
+        u = urlparse(self.path)
+        path, query = u.path[len(CTRL_PREFIX):], u.query
+        if not ctrl_path_ok(path):
+            self._json({"message": "path not allowed"}, 403)
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > CTRL_MAX_BODY:
+            self._json({"message": "invalid request body size"}, 400)
+            return
+        data = self.rfile.read(n) if n else None
+        stream = method == "GET" and path in CTRL_STREAMS
+        target = path + ("?" + query if query else "")
+        try:
+            resp = ctrl_open(method, target, data, timeout=CTRL_STREAM_IDLE if stream else 60)
+        except urllib.error.HTTPError as ex:
+            body = ex.read()
+            self._raw(ex.code, body, ex.headers.get("Content-Type") or "application/json")
+            return
+        except Exception as ex:
+            self._json({"message": f"controller unreachable: {ex}"}, 502)
+            return
+        with resp:
+            if not stream:
+                self._raw(resp.status, resp.read(), resp.headers.get("Content-Type") or "application/json")
+                return
+            self._stream_headers()
+            try:
+                for line in resp:
+                    self.wfile.write(line)
+            except (OSError, ValueError):  # 浏览器断开 / 上游空闲超时
+                pass
+
+    def _overview_stream(self):
+        """合并 traffic / memory / 连接数为一条 NDJSON 流，节省浏览器的并发连接数。
+        每行形如 {"traffic":{...}} / {"memory":{...}} / {"conns":{...}} / {"error":"..."}。"""
+        q = queue.Queue(maxsize=256)
+        stop = threading.Event()
+
+        def put(item):
+            try:
+                q.put_nowait(item)
+            except queue.Full:
+                pass
+
+        def pump(topic):
+            try:
+                with ctrl_open("GET", "/" + topic, timeout=30) as r:
+                    for line in r:
+                        if stop.is_set():
+                            return
+                        line = line.strip()
+                        if line:
+                            put((topic, line))
+            except Exception as ex:
+                put(("error", json.dumps(f"{topic}: {ex}", ensure_ascii=False).encode()))
+            finally:
+                put(None)  # 任一上游结束则结束整个流，由前端重连
+
+        def conns():
+            while not stop.is_set():
+                try:
+                    d = controller("GET", "/connections", timeout=10)
+                    put(("conns", json.dumps({"count": len(d.get("connections") or []),
+                                              "uploadTotal": d.get("uploadTotal") or 0,
+                                              "downloadTotal": d.get("downloadTotal") or 0}).encode()))
+                except Exception:
+                    pass
+                stop.wait(2)
+
+        for target, args in ((pump, ("traffic",)), (pump, ("memory",)), (conns, ())):
+            threading.Thread(target=target, args=args, daemon=True).start()
+        self._stream_headers()
+        try:
+            while True:
+                try:
+                    item = q.get(timeout=30)
+                except queue.Empty:
+                    break
+                if item is None:
+                    break
+                topic, payload = item
+                self.wfile.write(b'{"' + topic.encode() + b'":' + payload + b"}\n")
+        except OSError:
+            pass
+        finally:
+            stop.set()
+
+    def _other(self, method):
+        if not self._auth():
+            return
+        if urlparse(self.path).path.startswith(CTRL_PREFIX + "/"):
+            self._ctrl_proxy(method)
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def do_PUT(self):
+        self._other("PUT")
+
+    def do_PATCH(self):
+        self._other("PATCH")
+
+    def do_DELETE(self):
+        self._other("DELETE")
+
     def _body(self, max_bytes=None):
         n = int(self.headers.get("Content-Length") or 0)
         if n < 0 or (max_bytes is not None and n > max_bytes):
@@ -1026,6 +1189,12 @@ class Handler(BaseHTTPRequestHandler):
             self._login(tokens[0] if len(tokens) == 1 else None, redirect=True)
             return
         if not self._auth():
+            return
+        if u.path.startswith(CTRL_PREFIX + "/"):
+            self._ctrl_proxy("GET")
+            return
+        if u.path == "/api/stream/overview":
+            self._overview_stream()
             return
         try:
             if u.path == "/":
@@ -1075,6 +1244,9 @@ class Handler(BaseHTTPRequestHandler):
             self._login(data.get("token"))
             return
         if not self._auth():
+            return
+        if u.path.startswith(CTRL_PREFIX + "/"):
+            self._ctrl_proxy("POST")
             return
         try:
             data = self._body()
@@ -1135,7 +1307,7 @@ LOGIN_HTML = r"""<!doctype html>
 HTML = r"""<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#11141b"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>mihomo 管理</title>
+<title>mihomo 管理</title><link rel="icon" href="data:,">
 <style>
 :root{--bg:#0d1017;--card:#161a22;--card2:#1b2029;--ink:#0b0d11;--bd:#262c37;--bd2:#333b48;--fg:#e8eaf0;--mut:#8a91a0;--ok:#3fb950;--bad:#f85149;--acc:#58a6ff;--warn:#d29922;--pur:#a371f7;--cyan:#39c5cf;--pink:#f778ba;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--r:10px}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
@@ -1183,8 +1355,8 @@ button.btn.sm{padding:3px 9px;font-size:12px}button.btn:disabled{opacity:.45;cur
 .btn-group{display:inline-flex;border:1px solid #30363d;border-radius:7px;overflow:hidden}.btn-group .btn{border:0;border-radius:0;border-right:1px solid #30363d}.btn-group .btn:last-child{border-right:0}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
 /* inputs */
-select,input[type=text],input[type=search]{background:var(--ink);color:var(--fg);border:1px solid var(--bd);border-radius:7px;padding:6px 9px;font:inherit;font-size:13px;max-width:100%}
-input[type=text],input[type=search]{min-width:0;width:100%}
+select,input[type=text],input[type=search],input[type=number]{background:var(--ink);color:var(--fg);border:1px solid var(--bd);border-radius:7px;padding:6px 9px;font:inherit;font-size:13px;max-width:100%}
+input[type=text],input[type=search],input[type=number]{min-width:0;width:100%}
 select:focus,input:focus,textarea:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 2px rgba(88,166,255,.18)}
 textarea{width:100%;min-height:520px;background:var(--ink);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:12px;font:13px/1.5 var(--mono);tab-size:2;resize:vertical}
 .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--mut);user-select:none}
@@ -1283,6 +1455,77 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 .radd{margin-top:8px}.radd .btn{border-style:dashed;color:var(--mut)}.radd .btn:hover{color:var(--fg)}
 .rlegend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--mut);margin:10px 0 0}
 .rlegend i{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:4px}
+/* segmented control / mode switch */
+.seg{display:inline-flex;background:var(--ink);border:1px solid var(--bd);border-radius:8px;padding:2px;gap:2px;flex:none}
+.seg button{background:none;border:0;color:var(--mut);padding:4px 12px;border-radius:6px;cursor:pointer;font:inherit;font-size:12.5px;white-space:nowrap;line-height:1.5}
+.seg button:hover{color:var(--fg)}.seg button.on{background:#262c37;color:var(--fg);font-weight:600}
+.tbg{display:contents}
+/* live overview */
+.spd{font-family:var(--mono);gap:10px}.spd .u{color:var(--cyan)}.spd .d{color:var(--acc)}
+.charts{display:grid;grid-template-columns:3fr 2fr;gap:10px;margin-top:12px}
+.chart{background:var(--ink);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;min-width:0}
+.chart-h{display:flex;gap:12px;align-items:center;font-size:12px;color:var(--mut);margin-bottom:4px}.chart-h b{color:var(--fg);font-weight:600}
+.chart-h i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+.chart canvas{width:100%;height:150px;display:block}
+/* proxies */
+.pxg{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;align-items:start}
+.pgc{background:var(--ink);border:1px solid var(--bd);border-top:3px solid var(--bd2);border-radius:8px;min-width:0}
+.pgc.Selector{border-top-color:var(--acc)}.pgc.URLTest{border-top-color:var(--cyan)}.pgc.Fallback{border-top-color:var(--warn)}.pgc.LoadBalance{border-top-color:var(--pur)}
+.pgc.open{grid-column:1/-1}
+.pgc-h{display:flex;align-items:center;gap:8px;padding:9px 12px 3px;cursor:pointer;user-select:none;min-width:0}
+.pgc-h b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pgc-h .chev{color:var(--mut);transition:transform .15s;display:inline-block;width:10px;flex:none}.pgc.open .chev{transform:rotate(90deg)}
+.pgc-now{display:flex;align-items:center;gap:6px;padding:0 12px 8px 30px;font-size:12.5px;color:var(--mut);min-width:0;cursor:pointer}
+.pgc-now .nm{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dots{display:flex;flex-wrap:wrap;gap:4px;padding:0 12px 11px 30px;cursor:pointer}.dots i{width:8px;height:8px;border-radius:50%;background:var(--bd2)}
+.dots i.g{background:var(--ok)}.dots i.y{background:var(--warn)}.dots i.r{background:var(--bad)}.dots i.on{box-shadow:0 0 0 2px var(--ink),0 0 0 3px var(--fg)}
+.nds{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;padding:4px 12px 12px}
+.nd{background:var(--card);border:1px solid var(--bd);border-radius:7px;padding:7px 9px;min-width:0;transition:border-color .12s,background .12s}
+.nd.sel{cursor:pointer}.nd.sel:hover{border-color:var(--bd2);background:var(--card2)}.nd.on{border-color:var(--acc);background:rgba(88,166,255,.09)}
+.nd-n{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nd-m{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:10.5px;color:var(--mut);min-width:0}
+.nd-m .u{border:1px solid var(--bd);border-radius:4px;padding:0 4px;line-height:14px}.nd-m .sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.lat,.latv{background:none;border:0;padding:0 2px;font:600 11.5px var(--mono);color:var(--mut);white-space:nowrap;flex:none}.lat{cursor:pointer}.lat:hover{text-decoration:underline}
+.lat.g,.latv.g{color:var(--ok)}.lat.y,.latv.y{color:var(--warn)}.lat.r,.latv.r{color:var(--bad)}
+.pvs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.prv{background:var(--ink);border:1px solid var(--bd);border-left:3px solid var(--pur);border-radius:8px;padding:10px 12px;min-width:0}
+.prv-h{display:flex;align-items:center;gap:8px;margin-bottom:3px}.prv-h b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prv .act{display:flex;gap:4px;margin-top:8px}
+.bar{height:5px;background:#21262d;border-radius:3px;overflow:hidden;margin-top:5px}.bar i{display:block;height:100%;background:var(--acc)}.bar i.warn{background:var(--warn)}.bar i.bad{background:var(--bad)}
+/* connections */
+.cwrap{overflow:auto;max-height:72vh;border:1px solid var(--bd);border-radius:8px;background:var(--ink)}
+.ctbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.ctbl th{position:sticky;top:0;background:var(--card2);color:var(--mut);font-weight:500;text-align:left;padding:7px 8px;white-space:nowrap;cursor:pointer;user-select:none;border-bottom:1px solid var(--bd);z-index:1}
+.ctbl th:hover{color:var(--fg)}.ctbl th.s{color:var(--fg)}.ctbl th.s:after{content:" ▾"}.ctbl th.s.asc:after{content:" ▴"}
+.ctbl td{padding:5px 8px;border-bottom:1px solid var(--bd);white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+.ctbl tbody tr{cursor:pointer}.ctbl tbody tr:hover td{background:rgba(255,255,255,.025)}
+.ctbl td.num{font-family:var(--mono);font-size:12px;text-align:right}.ctbl td.x{width:1%;padding:2px 4px}
+.mob{display:none}
+/* runtime rules / lists */
+.lst{display:flex;flex-direction:column;gap:6px}
+.li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;background:var(--ink);border:1px solid var(--bd);border-left:3px solid var(--cyan);border-radius:8px;padding:8px 12px}
+.li .nm{min-width:0}.li .nm small{display:block;color:var(--mut);font-size:11.5px;margin-top:2px}.li .act{display:flex;gap:4px}
+.rrl{border:1px solid var(--bd);border-radius:8px;background:var(--ink);overflow:hidden}
+.rr{display:grid;grid-template-columns:48px 120px minmax(0,1fr) minmax(0,220px);gap:10px;padding:5px 10px;border-bottom:1px solid var(--bd);border-left:3px solid var(--mut);font-size:12.5px;align-items:center}
+.rr:last-child{border-bottom:0}.rr .i{color:var(--mut);font:11.5px var(--mono);text-align:right}.rr .ty{font:600 11.5px var(--mono)}
+.rr .pl{font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rr .px{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center}
+.rr.c-dom{border-left-color:#a371f7}.rr.c-ip{border-left-color:#d29922}.rr.c-rs{border-left-color:#39c5cf}.rr.c-proc{border-left-color:#f778ba}.rr.c-match{border-left-color:var(--bad)}
+/* live logs */
+.llog{font:12px/1.55 var(--mono);max-height:70vh;min-height:200px;overflow:auto;background:var(--ink);border:1px solid var(--bd);border-radius:8px;padding:6px 0}
+.ll{display:grid;grid-template-columns:62px 58px minmax(0,1fr);gap:8px;padding:1px 10px;border-left:2px solid transparent}
+.ll .tm{color:var(--mut)}.ll .lv{font-weight:600;font-size:10.5px;text-transform:uppercase;padding-top:1px}.ll .msg{word-break:break-all;white-space:pre-wrap}
+.ll.error{border-left-color:var(--bad)}.ll.error .lv,.ll.error .msg{color:#ff7b72}.ll.warning{border-left-color:var(--warn)}.ll.warning .lv{color:var(--warn)}.ll.info .lv{color:var(--acc)}.ll.debug .lv,.ll.debug .msg{color:var(--mut)}
+.ll mark{background:rgba(210,153,34,.35);color:inherit;border-radius:2px}
+/* settings */
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.sf{background:var(--ink);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.sf>b{font-size:12px;color:var(--mut);font-weight:500}.sf small{color:var(--mut);font-size:11.5px;min-height:1em}
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}.modal.on{display:flex}
+.modal-c{background:var(--card);border:1px solid var(--bd2);border-radius:12px;width:min(760px,100%);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.modal-h{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--bd)}.modal-h b{font-size:14px}
+.modal-b{padding:12px 16px;overflow:auto}.modal-f{display:flex;gap:8px;justify-content:flex-end;padding:10px 16px;border-top:1px solid var(--bd)}.modal-f:empty{display:none}
+.kvs{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 14px;font-size:12.5px}.kvs b{color:var(--mut);font-weight:500;white-space:nowrap}.kvs span{font-family:var(--mono);word-break:break-all}
 @media (max-width:640px){
  body{font-size:15px}
  header{padding:10px 12px 6px;padding-top:calc(10px + env(safe-area-inset-top));gap:8px}header h1{font-size:15px}header .pill{font-size:11px}header a.ext{display:inline-flex;align-items:center;min-height:32px;padding:4px 10px;white-space:nowrap}header a.ext .lg{display:none}
@@ -1304,17 +1547,30 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
  .radd .btn{width:100%;min-height:42px}
  input[type=text],input[type=search]{font-size:16px;min-height:40px}
  label{min-height:40px;display:inline-flex;align-items:center;gap:4px}input[type=checkbox]{width:18px;height:18px}
+ header .spd{display:none}
+ .charts{grid-template-columns:1fr}.chart canvas{height:130px}
+ .seg button{padding:6px 12px;font-size:13.5px}.toolbar .seg{flex:1 1 100%}.toolbar .seg button{flex:1}
+ .pxg{grid-template-columns:1fr}.nds{grid-template-columns:1fr 1fr;padding:4px 8px 10px}.pgc-now,.dots{padding-left:12px}
+ .mob{display:block}input[type=number]{font-size:16px;min-height:40px}
+ .cwrap{max-height:none;border:0;background:none}
+ .ctbl thead{display:none}.ctbl,.ctbl tbody,.ctbl tr,.ctbl td{display:block;width:100%}
+ .ctbl tr{background:var(--ink);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px;position:relative}
+ .ctbl td{border:0;padding:1px 0;max-width:none;white-space:normal;word-break:break-all;display:flex;gap:8px;text-align:left}.ctbl td.num{text-align:left}
+ .ctbl td:before{content:attr(data-l);color:var(--mut);min-width:60px;flex:none;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+ .ctbl td.x{position:absolute;top:6px;right:6px;width:auto}.ctbl td.x:before{display:none}
+ .rr{grid-template-columns:36px minmax(0,1fr);grid-template-areas:"i ty" "i pl" "i px";gap:1px 8px}.rr .i{grid-area:i;align-self:start}.rr .ty{grid-area:ty}.rr .pl{grid-area:pl;white-space:normal;word-break:break-all}.rr .px{grid-area:px}
+ .ll{grid-template-columns:58px minmax(0,1fr);grid-template-areas:"tm lv" "msg msg"}.ll .tm{grid-area:tm}.ll .lv{grid-area:lv}.ll .msg{grid-area:msg}
+ .sgrid{grid-template-columns:1fr}
+ .modal{padding:0;align-items:flex-end}.modal-c{border-radius:14px 14px 0 0;max-height:90vh;padding-bottom:env(safe-area-inset-bottom)}
 }
 </style></head><body>
 <div class="top">
-<header><div class="logo">M</div><h1>mihomo 管理</h1><span class="pill" id="hstate"><span class="dot"></span>…</span><span class="sp"></span>
+<header><div class="logo">M</div><h1>mihomo 管理</h1><span class="pill" id="hstate"><span class="dot"></span>…</span><span class="pill spd" id="hspd" style="display:none" title="实时上传 / 下载速度"><span class="u" id="hspd-u"></span><span class="d" id="hspd-d"></span></span><span class="sp"></span>
 <a id="dash" class="ext" href="#" target="_blank" rel="noopener" style="display:none"></a></header>
 <nav>
-<div class="ng"><button data-t="status" class="on">状态</button></div>
-<div class="ng"><span class="gl">代理</span><button data-t="rules">规则</button><button data-t="proxies">策略组</button></div>
-<div class="ng"><span class="gl">配置</span><button data-t="override">override<small>yaml</small></button><button data-t="config">config<small>只读</small></button></div>
+<div class="ng"><button data-t="status" class="on">概览</button><button data-t="proxies">代理</button><button data-t="conns">连接<small id="nav-conns"></small></button><button data-t="rtrules">规则</button><button data-t="logs">日志</button></div>
+<div class="ng"><span class="gl">配置</span><button data-t="rules">自定义规则</button><button data-t="override">override<small>yaml</small></button><button data-t="config">config<small>只读</small></button><button data-t="settings">内核设置</button></div>
 <div class="ng"><span class="gl">维护</span><button data-t="update">更新<small id="nav-upd"></small></button><button data-t="backups">备份</button></div>
-<div class="ng"><button data-t="logs">日志</button></div>
 </nav>
 </div>
 <main>
@@ -1323,6 +1579,19 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
   <div class="hero"><div class="big" id="h-big"></div><div><div class="t" id="h-t">加载中…</div><div class="s" id="h-s"></div></div><span class="sp"></span>
    <button class="btn pri" onclick="doUpdate()">↻ 更新订阅并应用</button></div>
   <div class="tiles" id="stat"></div>
+ </div>
+ <div class="card">
+  <div class="card-h"><h2>实时</h2><span class="d" id="live-st">连接 controller…</span><span class="sp"></span><span class="seg modesw" title="代理模式"></span></div>
+  <div class="tiles" id="live-tiles">
+   <div class="tile cyan"><b>上传速度</b><span class="mono" id="lv-up">-</span><small id="lv-upt"></small></div>
+   <div class="tile acc"><b>下载速度</b><span class="mono" id="lv-down">-</span><small id="lv-downt"></small></div>
+   <div class="tile ok"><b>活动连接</b><span class="mono" id="lv-conns">-</span><small><a href="#conns">查看连接 →</a></small></div>
+   <div class="tile pur"><b>内存占用</b><span class="mono" id="lv-mem">-</span><small>mihomo 进程</small></div>
+  </div>
+  <div class="charts">
+   <div class="chart"><div class="chart-h"><b>流量</b><span><i style="background:var(--cyan)"></i>上传</span><span><i style="background:var(--acc)"></i>下载</span><span class="sp"></span><span>最近 60 秒</span></div><canvas id="ch-tr"></canvas></div>
+   <div class="chart"><div class="chart-h"><b>内存</b><span><i style="background:var(--pur)"></i>占用</span></div><canvas id="ch-mem"></canvas></div>
+  </div>
  </div>
  <div class="card">
   <div class="card-h"><h2>服务操作</h2><span class="d">热重载不中断连接；重启会断开所有连接</span></div>
@@ -1387,8 +1656,72 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 </section>
 <section class="tab" id="t-proxies">
  <div class="card">
-  <div class="card-h"><h2>策略组</h2><span class="d">Selector 可手动切换；URLTest / Fallback 为自动选择。测速请用外部面板（如 metacubexd）。</span><span class="sp"></span><button class="btn sm" onclick="loadProxies()">↻ 刷新</button></div>
-  <div class="pgs" id="px"></div>
+  <div class="toolbar">
+   <span class="seg modesw" title="代理模式"></span>
+   <span class="search"><input type="search" id="pxq" placeholder="搜索节点 / 策略组" autocomplete="off"></span>
+   <select id="pxsort"><option value="">默认顺序</option><option value="delay">按延迟</option><option value="name">按名称</option></select>
+   <label class="switch"><input type="checkbox" id="pxhide"><i></i>隐藏超时</label>
+   <span class="sp"></span>
+   <button class="btn" id="px-expand" onclick="pxExpandAll()">全部展开</button>
+   <button class="btn pri" id="px-testall" onclick="pxTestAll()">⚡ 全部测速</button>
+   <button class="btn" onclick="loadProxies()">↻ 刷新</button>
+  </div>
+  <details style="margin:0 0 10px"><summary>测速与切换设置</summary>
+   <div class="row"><span class="mut" style="font-size:12px">测速地址</span><input type="text" id="px-url" style="max-width:340px" spellcheck="false"><span class="mut" style="font-size:12px">超时 ms</span><input type="number" id="px-to" min="500" max="30000" step="500" style="width:100px">
+    <label class="switch"><input type="checkbox" id="px-autoclose"><i></i>切换节点后断开该组的旧连接</label><button class="btn sm" onclick="pxSaveSet()">保存</button></div></details>
+  <div class="pxg" id="px"><div class="empty">加载中…</div></div>
+ </div>
+ <div class="card" id="pv-card" style="display:none">
+  <div class="card-h"><h2>代理集合</h2><span class="tag" id="pv-cnt">0</span><span class="d">proxy-providers · 订阅流量、更新与健康检查</span><span class="sp"></span><button class="btn sm" onclick="pvUpdateAll(this)">↻ 全部更新</button></div>
+  <div class="pvs" id="pvs"></div>
+ </div>
+</section>
+<section class="tab" id="t-conns">
+ <div class="card">
+  <div class="toolbar">
+   <span class="seg" id="cn-view"><button data-v="active" class="on">活动 <span id="cn-na">0</span></button><button data-v="closed">已关闭 <span id="cn-nc">0</span></button></span>
+   <span class="search"><input type="search" id="cnq" placeholder="过滤主机 / IP / 规则 / 链路 / 进程" autocomplete="off"></span>
+   <select id="cn-sort" class="mob"></select>
+   <label class="switch"><input type="checkbox" id="cn-pause"><i></i>暂停刷新</label>
+   <span class="sp"></span><span class="info" id="cn-info"></span>
+   <button class="btn dan" id="cn-closeall" onclick="cnCloseAll()">断开全部</button>
+  </div>
+  <div class="cwrap"><table class="ctbl"><thead id="cn-h"></thead><tbody id="cn-b"></tbody></table></div>
+  <div class="mut" id="cn-more" style="font-size:12px;margin-top:6px"></div>
+ </div>
+</section>
+<section class="tab" id="t-rtrules">
+ <div class="card" id="rp-card">
+  <div class="card-h"><h2>规则集</h2><span class="tag" id="rp-cnt">0</span><span class="d">rule-providers</span><span class="sp"></span><button class="btn sm" onclick="rpUpdateAll(this)">↻ 全部更新</button></div>
+  <div id="rps"></div>
+ </div>
+ <div class="card">
+  <div class="toolbar"><b style="font-size:14px">生效规则</b><span class="tag" id="rr-cnt">0</span><span class="search"><input type="search" id="rrq" placeholder="过滤类型 / 内容 / 策略" autocomplete="off"></span><span class="sp"></span>
+   <button class="btn" onclick="showTab('rules')">✎ 编辑自定义规则</button><button class="btn" onclick="loadRtRules()">↻ 刷新</button></div>
+  <div class="mut" style="font-size:12px;margin-bottom:8px">从运行中的 mihomo 读取，按顺序从上到下匹配，命中即停止。</div>
+  <div class="rrl" id="rrl"><div class="empty">加载中…</div></div>
+  <div class="row"><button class="btn sm" id="rr-more" onclick="RR.limit+=1000;renderRtRules()" style="display:none"></button></div>
+ </div>
+</section>
+<section class="tab" id="t-settings">
+ <div class="card">
+  <div class="card-h"><h2>内核设置</h2><span class="d" id="st-ver"></span><span class="sp"></span><button class="btn sm" onclick="loadSettings()">↻ 刷新</button></div>
+  <div class="kwarn" style="margin-bottom:12px">这里的修改直接作用于运行中的 mihomo，热重载、更新订阅或重启后会恢复为 config.yaml 里的值；要长期生效，请写进 <a href="#override">override.yaml</a>。</div>
+  <div class="sgrid" id="st-grid"><div class="empty">加载中…</div></div>
+ </div>
+ <div class="card">
+  <div class="card-h"><h2>维护操作</h2><span class="d">不会重启服务</span></div>
+  <div class="actions">
+   <button class="btn" onclick="stReload()">⟳ 重载 config.yaml</button>
+   <button class="btn" onclick="stAct('fakeip')">清空 FakeIP 缓存</button>
+   <button class="btn" onclick="stAct('dns')">清空 DNS 缓存</button>
+   <button class="btn dan" onclick="cnCloseAll(true)">断开所有连接</button>
+  </div>
+ </div>
+ <div class="card">
+  <div class="card-h"><h2>DNS 查询</h2><span class="d">用内核的 DNS 解析器查询</span></div>
+  <div class="row"><input type="text" id="dq-name" placeholder="example.com" style="max-width:320px" spellcheck="false" autocomplete="off" onkeydown="if(event.key==='Enter')dnsQuery()"><select id="dq-type"><option>A</option><option>AAAA</option><option>CNAME</option><option>MX</option><option>TXT</option><option>NS</option></select><button class="btn" onclick="dnsQuery()">查询</button></div>
+  <pre id="dq-out" class="mut">输入域名后查询</pre>
  </div>
 </section>
 <section class="tab" id="t-update">
@@ -1420,12 +1753,23 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 <section class="tab" id="t-logs">
  <div class="card">
   <div class="toolbar">
+   <span class="seg" id="lg-src"><button data-s="live" class="on">实时日志</button><button data-s="journal">systemd 日志</button></span>
+   <span class="tbg" id="lg-live-tb">
+   <select id="lg-level" title="日志级别"><option value="debug">debug</option><option value="info">info</option><option value="warning">warning</option><option value="error">error</option></select>
+   <span class="search"><input type="search" id="lgq" placeholder="过滤关键字（本地）" autocomplete="off"></span>
+   <label class="switch"><input type="checkbox" id="lg-pause"><i></i>暂停</label>
+   <span class="sp"></span><span class="info" id="lg-info"></span>
+   <button class="btn" onclick="LG.items=[];renderLiveLogs()">清空</button>
+   </span>
+   <span class="tbg" id="lg-journal-tb" style="display:none">
    <select id="logn"><option value="100">最近 100 行</option><option value="300" selected>最近 300 行</option><option value="1000">最近 1000 行</option><option value="2000">最近 2000 行</option></select>
    <span class="search"><input type="search" id="logq" placeholder="过滤关键字（本地）" autocomplete="off"></span>
    <label class="switch"><input type="checkbox" id="logauto"><i></i>自动刷新 5s</label>
    <span class="sp"></span><span class="info" id="log-info"></span>
-   <button class="btn" onclick="loadLogs()">↻ 刷新</button></div>
-  <pre id="logs" class="log"></pre>
+   <button class="btn" onclick="loadLogs()">↻ 刷新</button>
+   </span></div>
+  <div class="llog" id="llog"></div>
+  <pre id="logs" class="log" style="display:none"></pre>
  </div>
 </section>
 <section class="tab" id="t-config">
@@ -1438,6 +1782,7 @@ details{margin-top:8px}summary{cursor:pointer;color:var(--mut);font-size:12.5px;
 </section>
 </main>
 <div id="toast"></div>
+<div class="modal" id="modal" onclick="if(event.target===this)closeModal()"><div class="modal-c"><div class="modal-h"><b id="modal-t"></b><span class="sp"></span><button class="btn ghost sm" onclick="closeModal()">✕</button></div><div class="modal-b" id="modal-b"></div><div class="modal-f" id="modal-f"></div></div></div>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -1454,8 +1799,9 @@ function panel(id,state,title){const p=$('#p-'+id);if(p){p.className='panel'+(st
 function clearOut(id){$('#out-'+id).textContent='';$('#out-'+id).className='mut';panel(id,'')}
 function stickTop(){const h=document.querySelector('.top').offsetHeight;document.querySelectorAll('.toolbar').forEach(e=>e.style.top=h+'px')}
 async function copyText(t,what){try{await navigator.clipboard.writeText(t);toast(`已复制 ${what}`)}catch(e){toast('复制失败: '+e.message,1)}}
-const LOADERS={rules:loadRules,override:loadOverride,backups:loadBackups,update:loadUpdate,proxies:loadProxies,logs:loadLogs,config:loadConfig,status:loadStatus};
-function showTab(t,push=true){const b=document.querySelector(`nav button[data-t="${t}"]`);if(!b)return;document.querySelectorAll('nav button,.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#t-'+t).classList.add('on');stickTop();if(push)history.replaceState(null,'','#'+t);LOADERS[t]()}
+const LOADERS={rules:loadRules,override:loadOverride,backups:loadBackups,update:loadUpdate,proxies:loadProxies,logs:loadLogsTab,config:loadConfig,status:loadStatus,conns:cnStart,rtrules:loadRtRules,settings:loadSettings};
+let CUR='status';
+function showTab(t,push=true){const b=document.querySelector(`nav button[data-t="${t}"]`);if(!b)return;document.querySelectorAll('nav button,.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');$('#t-'+t).classList.add('on');stickTop();if(push)history.replaceState(null,'','#'+t);CUR=t;if(t!=='conns')cnStop();if(t==='status')requestAnimationFrame(liveCharts);LOADERS[t]()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 window.addEventListener('hashchange',()=>showTab(location.hash.slice(1),false));
 window.addEventListener('resize',stickTop);
@@ -1477,7 +1823,7 @@ async function loadStatus(){try{const s=await api('/api/status');const sv=s.serv
  +tile('订阅地址',`<span class="mono" style="font-size:12px">${esc(s.sub_url||'-')}</span>`,'')
  +tile('controller',`<span class="mono" style="font-size:12px">${esc(s.controller||'-')}</span>`,'')
  +tile('服务器时间',esc(s.now),'');
- stickTop();
+ stickTop();loadMode();
 }catch(e){$('#hstate').innerHTML=`<span class="dot bad"></span>状态获取失败`;$('#h-t').textContent='状态获取失败';$('#h-s').textContent=e.message}}
 async function doUpdate(){if(!confirm('下载订阅、合并 override、校验后替换 config 并重启服务？'))return;busy(1);panel('status','busy','<span class="spin"></span>更新中…');$('#out-status').className='mut';$('#out-status').textContent='下载订阅 → 合并 → 校验 → 重启…';
  try{const r=await api('/api/update',{});panel('status',r.ok?'ok':'bad',`rc=${r.rc} · ${r.seconds}s`);$('#out-status').className=r.ok?'ok':'bad';$('#out-status').textContent=r.output;toast(r.ok?'更新完成':'更新失败',!r.ok)}catch(e){panel('status','bad','');$('#out-status').className='bad';$('#out-status').textContent=e.message}finally{busy(0);loadStatus()}}
@@ -1578,13 +1924,216 @@ async function bkDiff(n){document.querySelectorAll('#bk .bki').forEach(x=>x.clas
 async function bkRestore(n){if(!confirm(`恢复 ${n} 为当前 config.yaml 并重启服务？`))return;busy(1);panel('bk','busy');$('#bk-diff-t').textContent='恢复 '+n;$('#bk-diff-stat').textContent='';$('#bk-diff').className='diff mut';$('#bk-diff').innerHTML='<span class="spin"></span>校验 → 备份当前 → 替换 → 重启…';
  try{const r=await api(`/api/backups/${n}/restore`,{});panel('bk',r.ok?'ok':'bad');$('#bk-diff').className=r.ok?'ok':'bad';$('#bk-diff').textContent=r.output;toast(r.ok?'已恢复':'恢复失败',!r.ok)}catch(e){panel('bk','bad');$('#bk-diff').className='bad';$('#bk-diff').textContent=e.message}finally{busy(0);loadBackups();loadStatus()}}
 
-/* ---------- proxies ---------- */
-const PGT={Selector:['acc','手动'],URLTest:['cyan','自动测速'],Fallback:['warn','故障转移'],LoadBalance:['pur','负载均衡']};
-async function loadProxies(){try{const r=await api('/api/proxies');$('#px').innerHTML=r.groups.map(g=>{const [c,l]=PGT[g.type]||['',g.type];const nm=esc(g.name).replace(/'/g,"\\'");
- return `<div class="pg ${g.type}"><div class="pg-h"><b title="${esc(g.name)}">${esc(g.name)}</b><span class="sp"></span><span class="tag ${c}">${l}</span></div>
- ${g.type==='Selector'?`<select onchange="selProxy('${nm}',this.value,this)">${g.all.map(p=>`<option ${p===g.now?'selected':''}>${esc(p)}</option>`).join('')}</select>`:`<div class="now"><span class="dot ${c}"></span>${esc(g.now||'-')}<small>（自动）</small></div>`}
- <div class="cnt">${g.all.length} 个候选</div></div>`}).join('')||'<div class="empty">没有策略组</div>'}catch(e){$('#px').innerHTML=`<div class="empty bad">${esc(e.message)}</div>`}}
-async function selProxy(g,n,el){el.disabled=true;try{await api('/api/proxies/select',{group:g,name:n});toast(`${g} → ${n}`)}catch(e){toast(e.message,1);loadProxies()}finally{el.disabled=false}}
+/* ---------- 内置面板：mihomo controller（经管理页后端转发） ---------- */
+const MH='/api/mihomo',enc=encodeURIComponent;
+async function mh(p,method='GET',body){const o={method};if(body!==undefined){o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(body)}
+ const r=await fetch(MH+p,o);const t=await r.text();let j=null;if(t){try{j=JSON.parse(t)}catch(e){}}
+ if(!r.ok)throw new Error((j&&(j.message||j.error))||t||('HTTP '+r.status));return j??{}}
+/* NDJSON 流：断开后自动重连（指数退避）。onMsg 返回 false 表示这是一条错误消息，不重置退避 */
+function openStream(url,onMsg,onErr){let stopped=false,ctl=null,delay=1000;
+ (async()=>{while(!stopped){ctl=new AbortController();try{const r=await fetch(url,{signal:ctl.signal});if(!r.ok){let m='HTTP '+r.status;try{m=(await r.json()).message||m}catch(e){}throw new Error(m)}
+   const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+   for(;;){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i).trim();buf=buf.slice(i+1);if(!l)continue;let m;try{m=JSON.parse(l)}catch(e){continue}if(onMsg(m)!==false)delay=1000}}}
+  catch(e){if(stopped)return;onErr&&onErr(e.message)}
+  if(stopped)return;await new Promise(r=>setTimeout(r,delay));delay=Math.min(delay*2,15000)}})();
+ return{stop(){stopped=true;ctl&&ctl.abort()}}}
+function modal(title,body,foot){$('#modal-t').textContent=title;$('#modal-b').innerHTML=body;$('#modal-f').innerHTML=foot||'';$('#modal').classList.add('on')}
+function closeModal(){$('#modal').classList.remove('on')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+function fmtSpd(n){return fmtBytes(Math.round(n||0))+'/s'}
+function fmtShort(n){return n<1024?Math.round(n)+' B':n<1048576?(n/1024).toFixed(n<10240?1:0)+' KB':n<1073741824?(n/1048576).toFixed(n<10485760?1:0)+' MB':(n/1073741824).toFixed(2)+' GB'}
+function fmtDurS(ms){const s=Math.max(0,Math.floor(ms/1000));return s<60?s+'s':s<3600?`${Math.floor(s/60)}m${s%60}s`:s<86400?`${Math.floor(s/3600)}h${Math.floor(s%3600/60)}m`:`${Math.floor(s/86400)}d${Math.floor(s%86400/3600)}h`}
+function fmtUpd(iso){const d=new Date(iso||0);if(isNaN(d)||d.getFullYear()<2000)return'-';return d.toLocaleString('zh-CN',{hour12:false})+' · '+rel(d.getTime()/1000)}
+function hl(t,q){const s=esc(t);if(!q)return s;const re=new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'ig');return s.replace(re,m=>`<mark>${m}</mark>`)}
+async function btnBusy(b,fn){const h=b?b.innerHTML:'';if(b){b.disabled=true;b.innerHTML='<span class="spin"></span>'+h}try{return await fn()}finally{if(b){b.disabled=false;b.innerHTML=h}}}
+
+/* ---------- 代理模式 ---------- */
+const MODES=[['rule','规则'],['global','全局'],['direct','直连']];let MODE='';
+function modeBtns(){return MODES.map(([k,l])=>`<button data-mode="${k}" class="${MODE.toLowerCase()===k?'on':''}">${l}</button>`).join('')}
+function renderModeSw(){document.querySelectorAll('.modesw').forEach(e=>e.innerHTML=modeBtns())}
+async function loadMode(){try{const c=await mh('/configs');MODE=String(c.mode||'');renderModeSw()}catch(e){}}
+document.addEventListener('click',async e=>{const b=e.target.closest('.modesw button');if(!b)return;const m=b.dataset.mode;if(m===MODE.toLowerCase())return;
+ try{await mh('/configs','PATCH',{mode:m});MODE=m;renderModeSw();toast('代理模式：'+MODES.find(x=>x[0]===m)[1]);if(CUR==='proxies')renderProxies()}catch(ex){toast(ex.message,1)}});
+
+/* ---------- 实时概览：流量 / 内存 / 连接数 ---------- */
+const LIVE={tr:[],mem:[],up:0,down:0,upT:null,downT:null,conns:null,inuse:null,s:null,ok:null,raf:0};
+function liveState(ok,msg){if(LIVE.ok===ok&&ok)return;LIVE.ok=ok;$('#live-st').innerHTML=ok?'<span class="ok">●</span> 已连接 controller':`<span class="bad">● 无法连接 controller</span>${msg?' · '+esc(msg):''}`;$('#hspd').style.display=ok?'':'none'}
+function liveStart(){if(LIVE.s)return;LIVE.s=openStream('/api/stream/overview',m=>{
+  if(m.error){liveState(false,m.error);return false}
+  if(m.traffic){const t=m.traffic;LIVE.up=t.up||0;LIVE.down=t.down||0;LIVE.tr.push([LIVE.up,LIVE.down]);if(LIVE.tr.length>60)LIVE.tr.shift()}
+  if(m.memory&&m.memory.inuse){LIVE.inuse=m.memory.inuse;LIVE.mem.push(LIVE.inuse);if(LIVE.mem.length>60)LIVE.mem.shift()}
+  if(m.conns){LIVE.conns=m.conns.count;LIVE.upT=m.conns.uploadTotal;LIVE.downT=m.conns.downloadTotal}
+  liveState(true);if(!LIVE.raf)LIVE.raf=requestAnimationFrame(liveRender)},msg=>liveState(false,msg))}
+function liveStop(){if(LIVE.s){LIVE.s.stop();LIVE.s=null}}
+function liveRender(){LIVE.raf=0;$('#hspd-u').textContent='↑ '+fmtSpd(LIVE.up);$('#hspd-d').textContent='↓ '+fmtSpd(LIVE.down);
+ $('#nav-conns').textContent=LIVE.conns??'';if(CUR!=='status')return;
+ $('#lv-up').textContent=fmtSpd(LIVE.up);$('#lv-down').textContent=fmtSpd(LIVE.down);
+ $('#lv-upt').textContent=LIVE.upT!=null?'累计 '+fmtBytes(LIVE.upT):'';$('#lv-downt').textContent=LIVE.downT!=null?'累计 '+fmtBytes(LIVE.downT):'';
+ $('#lv-conns').textContent=LIVE.conns??'-';$('#lv-mem').textContent=LIVE.inuse!=null?fmtBytes(LIVE.inuse):'-';liveCharts()}
+function niceMax(v){if(!(v>0))return 1024;const p=Math.pow(1024,Math.floor(Math.log(v)/Math.log(1024)));const n=v/p;return (n<=1?1:n<=2?2:n<=4?4:n<=8?8:n<=16?16:n<=32?32:n<=64?64:n<=128?128:n<=256?256:n<=512?512:1024)*p}
+function drawChart(cv,series,fmt){const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;const dpr=window.devicePixelRatio||1;cv.width=w*dpr;cv.height=h*dpr;const c=cv.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
+ const N=60,top=14,bot=h-2;let max=0;series.forEach(s=>s.data.forEach(v=>{if(v>max)max=v}));max=niceMax(max);
+ c.font='10px ui-monospace,Menlo,monospace';c.lineWidth=1;
+ for(let i=0;i<=2;i++){const y=Math.round(top+(bot-top)*i/2)+.5;c.strokeStyle='#262c37';c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke();c.fillStyle='#8a91a0';c.fillText(fmt(max*(1-i/2)),4,y-3)}
+ series.forEach(s=>{const d=s.data;if(d.length<2)return;const off=N-d.length,X=i=>(off+i)/(N-1)*w,Y=v=>bot-(bot-top)*(v/max);
+  c.beginPath();d.forEach((v,i)=>i?c.lineTo(X(i),Y(v)):c.moveTo(X(i),Y(v)));c.strokeStyle=s.color;c.lineWidth=1.6;c.lineJoin='round';c.stroke();
+  c.lineTo(X(d.length-1),bot);c.lineTo(X(0),bot);c.closePath();const g=c.createLinearGradient(0,top,0,bot);g.addColorStop(0,s.color+'40');g.addColorStop(1,s.color+'00');c.fillStyle=g;c.fill()})}
+function liveCharts(){if(CUR!=='status')return;drawChart($('#ch-tr'),[{data:LIVE.tr.map(x=>x[0]),color:'#39c5cf'},{data:LIVE.tr.map(x=>x[1]),color:'#58a6ff'}],v=>fmtShort(v)+'/s');drawChart($('#ch-mem'),[{data:LIVE.mem,color:'#a371f7'}],fmtShort)}
+window.addEventListener('resize',()=>requestAnimationFrame(liveCharts));
+
+/* ---------- 代理 ---------- */
+const PGT={Selector:['acc','手动'],URLTest:['cyan','自动测速'],Fallback:['warn','故障转移'],LoadBalance:['pur','负载均衡'],Relay:['','链式']};
+const SELECTABLE=new Set(['Selector','URLTest','Fallback']);
+const PXS={url:localStorage.getItem('px-url')||'https://www.gstatic.com/generate_204',to:+localStorage.getItem('px-to')||5000,autoclose:localStorage.getItem('px-autoclose')==='1',open:new Set(JSON.parse(localStorage.getItem('px-open')||'[]'))};
+let PX={proxies:{},providers:{}};const LAT={},TESTING=new Set();
+function isGroup(p){return !!(p&&Array.isArray(p.all))}
+function lat(n,d=0){if(LAT[n]!==undefined)return LAT[n];const p=PX.proxies[n];if(!p)return undefined;if(isGroup(p)&&p.now&&d<6)return lat(p.now,d+1);
+ const h=(p.extra&&p.extra[PXS.url]&&p.extra[PXS.url].history)||p.history;return h&&h.length?h[h.length-1].delay:undefined}
+function latCls(d){return d===undefined?'':d<=0?'r':d<300?'g':d<800?'y':'r'}
+function latTxt(d){return d===undefined?'—':d<=0?'超时':d+'ms'}
+function pxGroups(){const P=PX.proxies;const order=((P.GLOBAL&&P.GLOBAL.all)||[]).filter(n=>isGroup(P[n]));const seen=new Set(order);
+ Object.keys(P).forEach(n=>{if(isGroup(P[n])&&n!=='GLOBAL'&&!seen.has(n))order.push(n)});
+ const gs=order.map(n=>P[n]).filter(g=>!g.hidden);if(MODE.toLowerCase()==='global'&&P.GLOBAL)gs.unshift(P.GLOBAL);return gs}
+function pxNodes(g,q){let ns=(g.all||[]).slice();if(q&&!g.name.toLowerCase().includes(q))ns=ns.filter(n=>n.toLowerCase().includes(q));
+ if($('#pxhide').checked)ns=ns.filter(n=>n===g.now||lat(n)!==0);
+ const s=$('#pxsort').value;if(s==='name')ns.sort((a,b)=>a.localeCompare(b,'zh'));else if(s==='delay'){const k=n=>{const d=lat(n);return d>0?d:d===0?1e9:1e8};ns.sort((a,b)=>k(a)-k(b))}return ns}
+function ndHtml(g,n){const p=PX.proxies[n]||{},d=lat(n),on=g.now===n,sel=SELECTABLE.has(g.type);
+ return `<div class="nd ${on?'on':''} ${sel?'sel':''}" data-n="${attr(n)}" title="${attr(n)}"><div class="nd-n">${esc(n)}</div><div class="nd-m"><span>${esc(p.type||'')}</span>${p.udp?'<span class="u">UDP</span>':''}${isGroup(p)?`<span class="sub">→ ${esc(p.now||'')}</span>`:''}<span class="sp"></span><button class="lat ${latCls(d)}" data-n="${attr(n)}" title="点击测速">${TESTING.has(n)?'<span class="spin"></span>':latTxt(d)}</button></div></div>`}
+function renderProxies(){const q=$('#pxq').value.trim().toLowerCase();const gs=pxGroups();
+ const html=gs.map(g=>{const ns=pxNodes(g,q);if(q&&!ns.length&&!g.name.toLowerCase().includes(q))return'';const open=PXS.open.has(g.name)||!!q;const [c,l]=PGT[g.type]||['',g.type];const d=lat(g.now);
+  return `<div class="pgc ${esc(g.type)} ${open?'open':''}" data-g="${attr(g.name)}"><div class="pgc-h" data-act="toggle"><span class="chev">›</span><b title="${attr(g.name)}">${esc(g.name)}</b><span class="tag ${c}">${esc(l)}</span><span class="mut" style="font-size:12px">${(g.all||[]).length}</span><span class="sp"></span><button class="btn sm ghost" data-act="gtest" title="测速此组">${TESTING.has('g:'+g.name)?'<span class="spin" style="margin:0"></span>':'⚡'}</button></div>
+  <div class="pgc-now" data-act="toggle"><span>当前</span><span class="nm">${esc(g.now||'-')}</span><span class="latv ${latCls(d)}">${g.now?latTxt(d):''}</span></div>
+  ${open?`<div class="nds">${ns.map(n=>ndHtml(g,n)).join('')||'<span class="mut" style="font-size:12px">无匹配节点</span>'}</div>`:`<div class="dots" data-act="toggle">${ns.slice(0,160).map(n=>`<i class="${latCls(lat(n))} ${n===g.now?'on':''}" title="${attr(n)} ${latTxt(lat(n))}"></i>`).join('')}</div>`}</div>`}).join('');
+ $('#px').innerHTML=html||`<div class="empty">${q?'没有匹配的节点':'没有策略组'}</div>`;
+ $('#px-expand').textContent=gs.length&&gs.every(g=>PXS.open.has(g.name))?'全部折叠':'全部展开'}
+function pxSaveOpen(){localStorage.setItem('px-open',JSON.stringify([...PXS.open]))}
+function pxToggle(g){PXS.open.has(g)?PXS.open.delete(g):PXS.open.add(g);pxSaveOpen();renderProxies()}
+function pxExpandAll(){const gs=pxGroups();if(gs.every(g=>PXS.open.has(g.name)))PXS.open.clear();else gs.forEach(g=>PXS.open.add(g.name));pxSaveOpen();renderProxies()}
+$('#px').addEventListener('click',e=>{const card=e.target.closest('.pgc');if(!card)return;const g=card.dataset.g;
+ const lb=e.target.closest('.lat');if(lb){pxTestOne(lb.dataset.n);return}
+ const a=e.target.closest('[data-act]');if(a&&a.dataset.act==='gtest'){pxTestGroup(g);return}
+ const nd=e.target.closest('.nd');if(nd){if(nd.classList.contains('sel'))pxSelect(g,nd.dataset.n);return}
+ if(a&&a.dataset.act==='toggle')pxToggle(g)});
+['pxq','pxsort','pxhide'].forEach(id=>$('#'+id).addEventListener(id==='pxq'?'input':'change',renderProxies));
+async function pxRefresh(){try{PX.proxies=(await mh('/proxies')).proxies||{}}catch(e){}renderProxies()}
+async function loadProxies(){$('#px-url').value=PXS.url;$('#px-to').value=PXS.to;$('#px-autoclose').checked=PXS.autoclose;
+ try{const [p,pv,c]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}})),mh('/configs').catch(()=>null)]);
+  PX.proxies=p.proxies||{};PX.providers=pv.providers||{};if(c){MODE=String(c.mode||'');renderModeSw()}renderProxies();renderProviders()}
+ catch(e){$('#px').innerHTML=`<div class="empty bad">无法读取代理列表：${esc(e.message)}</div>`}}
+function pxSaveSet(){const u=$('#px-url').value.trim(),t=parseInt($('#px-to').value,10);if(!/^https?:\/\//.test(u)){toast('测速地址需以 http(s):// 开头',1);return}
+ PXS.url=u;PXS.to=t>0?t:5000;PXS.autoclose=$('#px-autoclose').checked;localStorage.setItem('px-url',PXS.url);localStorage.setItem('px-to',PXS.to);localStorage.setItem('px-autoclose',PXS.autoclose?'1':'0');toast('已保存');renderProxies()}
+async function pxSelect(g,n){const grp=PX.proxies[g];if(!grp||grp.now===n)return;
+ try{await mh('/proxies/'+enc(g),'PUT',{name:n});grp.now=n;renderProxies();toast(`${g} → ${n}`);
+  if(PXS.autoclose){const s=await mh('/connections');const ids=(s.connections||[]).filter(c=>(c.chains||[]).includes(g)&&!(c.chains||[]).includes(n)).map(c=>c.id);await Promise.all(ids.map(id=>mh('/connections/'+enc(id),'DELETE').catch(()=>{})));if(ids.length)toast(`${g} → ${n}，已断开 ${ids.length} 个旧连接`)}
+  pxRefresh()}catch(e){toast(e.message,1)}}
+async function pxTestOne(n){if(!n||TESTING.has(n))return;TESTING.add(n);renderProxies();
+ try{const r=await mh(`/proxies/${enc(n)}/delay?url=${enc(PXS.url)}&timeout=${PXS.to}`);LAT[n]=r.delay||0}catch(e){LAT[n]=0}finally{TESTING.delete(n);renderProxies()}}
+async function pxTestGroup(name,quiet){const g=PX.proxies[name];if(!g||TESTING.has('g:'+name))return;const all=g.all||[];TESTING.add('g:'+name);all.forEach(n=>TESTING.add(n));if(!quiet)renderProxies();
+ try{const r=await mh(`/group/${enc(name)}/delay?url=${enc(PXS.url)}&timeout=${PXS.to}`);all.forEach(n=>{LAT[n]=r[n]||0})}
+ catch(e){all.forEach(n=>{LAT[n]=0});if(!quiet)toast(`${name} 测速失败：${e.message}`,1)}
+ finally{TESTING.delete('g:'+name);all.forEach(n=>TESTING.delete(n));if(!quiet)await pxRefresh()}}
+async function pxTestAll(){const b=$('#px-testall');const names=pxGroups().filter(g=>g.name!=='GLOBAL').map(g=>g.name);if(!names.length)return;
+ await btnBusy(b,async()=>{names.forEach(n=>{TESTING.add('g:'+n);(PX.proxies[n].all||[]).forEach(x=>TESTING.add(x))});renderProxies();
+  let i=0;const worker=async()=>{while(i<names.length){const n=names[i++];TESTING.delete('g:'+n);await pxTestGroup(n,true);renderProxies()}};
+  await Promise.all([worker(),worker(),worker()]);TESTING.clear();await pxRefresh();toast(`已测速 ${names.length} 个策略组`)})}
+function renderProviders(){const list=Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible');$('#pv-card').style.display=list.length?'':'none';$('#pv-cnt').textContent=list.length;
+ $('#pvs').innerHTML=list.map(p=>{const si=p.subscriptionInfo;let sub='';if(si&&(si.Total||si.Download||si.Upload)){const used=(si.Upload||0)+(si.Download||0),tot=si.Total||0,pct=tot?Math.min(100,used/tot*100):0;
+   sub=`<div class="mut" style="font-size:11.5px;margin-top:6px">已用 ${fmtBytes(used)} / ${tot?fmtBytes(tot):'不限'}${tot?` (${pct.toFixed(1)}%)`:''}${si.Expire?` · 到期 ${new Date(si.Expire*1000).toLocaleDateString('zh-CN')}`:''}</div>${tot?`<div class="bar"><i class="${pct>90?'bad':pct>70?'warn':''}" style="width:${pct.toFixed(1)}%"></i></div>`:''}`}
+  const ps=p.proxies||[];const ok=ps.filter(x=>{const h=x.history||[];return h.length&&h[h.length-1].delay>0}).length;
+  return `<div class="prv" data-p="${attr(p.name)}"><div class="prv-h"><b title="${attr(p.name)}">${esc(p.name)}</b><span class="tag">${esc(p.vehicleType)}</span><span class="sp"></span><span class="mut" style="font-size:12px">${ps.length} 个节点${ok?` · <span class="ok">${ok} 可用</span>`:''}</span></div>
+   <div class="mut" style="font-size:11.5px">更新于 ${fmtUpd(p.updatedAt)}</div>${sub}<div class="act"><button class="btn sm" data-act="up">↻ 更新</button><button class="btn sm" data-act="hc">⚡ 健康检查</button></div></div>`}).join('')}
+$('#pvs').addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;const n=b.closest('.prv').dataset.p;
+ await btnBusy(b,async()=>{try{if(b.dataset.act==='up'){await mh('/providers/proxies/'+enc(n),'PUT');toast(`${n} 已更新`)}else{await mh(`/providers/proxies/${enc(n)}/healthcheck`);toast(`${n} 健康检查完成`)}}catch(ex){toast(`${n}：${ex.message}`,1)}});loadProxies()});
+async function pvUpdateAll(b){const names=Object.values(PX.providers||{}).filter(p=>p.vehicleType&&p.vehicleType!=='Compatible').map(p=>p.name);
+ await btnBusy(b,async()=>{const r=await Promise.allSettled(names.map(n=>mh('/providers/proxies/'+enc(n),'PUT')));const bad=r.filter(x=>x.status==='rejected').length;toast(bad?`${bad} 个代理集合更新失败`:`已更新 ${names.length} 个代理集合`,!!bad)});loadProxies()}
+
+/* ---------- 连接 ---------- */
+const CCOLS=[['host','主机'],['net','类型'],['rule','规则'],['chain','链路'],['dls','↓ 速度'],['uls','↑ 速度'],['dl','↓ 总量'],['ul','↑ 总量'],['src','来源'],['proc','进程'],['start','时长']];
+const CNUM=new Set(['dls','uls','dl','ul','start']);
+const CN={rows:[],prev:new Map(),closed:[],view:'active',sk:'start',sd:-1,timer:null,busy:false,last:0,err:''};
+$('#cn-sort').innerHTML=CCOLS.flatMap(([k,l])=>[`<option value="${k}:-1">${l} ↓</option>`,`<option value="${k}:1">${l} ↑</option>`]).join('');$('#cn-sort').value='start:-1';
+function cnRow(c,now){const m=c.metadata||{};const h=m.host||m.sniffHost||m.destinationIP||'';const host=h.includes(':')&&!m.host?`[${h}]`:h;
+ return {id:c.id,host:host+(m.destinationPort?':'+m.destinationPort:''),net:(m.network||'').toUpperCase(),type:m.type||'',rule:(c.rule||'')+(c.rulePayload?` (${c.rulePayload})`:''),chain:(c.chains||[]).slice().reverse().join(' → '),
+  dl:c.download||0,ul:c.upload||0,dls:0,uls:0,src:(m.sourceIP||'')+(m.sourcePort?':'+m.sourcePort:''),proc:m.process||(m.processPath||'').split('/').pop()||'',start:Date.parse(c.start)||now,raw:c}}
+async function cnPoll(){if(CN.busy||$('#cn-pause').checked)return;CN.busy=true;
+ try{const s=await mh('/connections');const now=Date.now(),dt=CN.last?(now-CN.last)/1000:0;CN.last=now;const next=new Map();
+  CN.rows=(s.connections||[]).map(c=>{const r=cnRow(c,now),p=CN.prev.get(r.id);if(p&&dt>0){r.dls=Math.max(0,(r.dl-p.dl)/dt);r.uls=Math.max(0,(r.ul-p.ul)/dt)}next.set(r.id,r);return r});
+  for(const [id,p] of CN.prev)if(!next.has(id)){p.end=now;p.dls=p.uls=0;CN.closed.unshift(p)}if(CN.closed.length>500)CN.closed.length=500;CN.prev=next;CN.err=''}
+ catch(e){CN.err=e.message}finally{CN.busy=false}cnRender()}
+function cnStart(){cnRender();if(CN.timer)return;CN.last=0;cnPoll();CN.timer=setInterval(()=>{if(!document.hidden)cnPoll()},1000)}
+function cnStop(){if(CN.timer){clearInterval(CN.timer);CN.timer=null}}
+function cnList(){const src=CN.view==='active'?CN.rows:CN.closed;const q=$('#cnq').value.trim().toLowerCase();
+ const l=q?src.filter(r=>[r.host,r.rule,r.chain,r.proc,r.src,r.net,r.type,(r.raw.metadata||{}).destinationIP||''].some(x=>String(x).toLowerCase().includes(q))):src.slice();
+ const k=CN.sk,d=CN.sd;l.sort((a,b)=>(CNUM.has(k)?a[k]-b[k]:String(a[k]).localeCompare(String(b[k])))*d);return l}
+function cnRender(){if(CUR!=='conns')return;const now=Date.now(),act=CN.view==='active';const l=cnList(),LIM=300;
+ $('#cn-na').textContent=CN.rows.length;$('#cn-nc').textContent=CN.closed.length;$('#cn-closeall').textContent=act?($('#cnq').value.trim()?'断开筛选结果':'断开全部'):'清空记录';
+ const ud=CN.rows.reduce((a,r)=>[a[0]+r.dls,a[1]+r.uls],[0,0]);
+ $('#cn-info').innerHTML=CN.err?`<span class="bad">${esc(CN.err)}</span>`:act?`↓ ${fmtSpd(ud[0])} · ↑ ${fmtSpd(ud[1])}`:'';
+ $('#cn-h').innerHTML='<tr>'+CCOLS.map(([k,lb])=>`<th data-k="${k}" class="${CN.sk===k?'s'+(CN.sd>0?' asc':''):''}">${lb}</th>`).join('')+'<th></th></tr>';
+ const td=(l2,v,cls='',t)=>`<td data-l="${l2}" class="${cls}"${t?` title="${attr(t)}"`:''}>${v}</td>`;
+ $('#cn-b').innerHTML=l.slice(0,LIM).map(r=>`<tr data-id="${attr(r.id)}">${td('主机',esc(r.host),'',r.host)}${td('类型',`<span class="tag">${esc(r.net)}</span> <span class="mut">${esc(r.type)}</span>`)}${td('规则',esc(r.rule),'',r.rule)}${td('链路',esc(r.chain),'',r.chain)}
+  ${td('↓ 速度',r.dls?fmtSpd(r.dls):'-','num')}${td('↑ 速度',r.uls?fmtSpd(r.uls):'-','num')}${td('↓ 总量',fmtBytes(r.dl),'num')}${td('↑ 总量',fmtBytes(r.ul),'num')}${td('来源',esc(r.src),'mono')}${td('进程',esc(r.proc||'-'),'',r.raw.metadata&&r.raw.metadata.processPath)}${td('时长',fmtDurS((r.end||now)-r.start),'num')}
+  <td class="x">${act?'<button class="btn sm ghost" data-close title="断开">✕</button>':''}</td></tr>`).join('')||`<tr><td colspan="12" class="mut" style="text-align:center;padding:20px">${act?'没有活动连接':'暂无已关闭的连接'}</td></tr>`;
+ $('#cn-more').textContent=l.length>LIM?`共 ${l.length} 条，仅显示前 ${LIM} 条，请用过滤缩小范围`:(act?'':'记录本页打开期间关闭的连接，最多 500 条')}
+$('#cn-h').addEventListener('click',e=>{const th=e.target.closest('th[data-k]');if(!th)return;const k=th.dataset.k;if(CN.sk===k)CN.sd=-CN.sd;else{CN.sk=k;CN.sd=CNUM.has(k)?-1:1}$('#cn-sort').value=`${CN.sk}:${CN.sd}`;cnRender()});
+$('#cn-sort').addEventListener('change',e=>{const [k,d]=e.target.value.split(':');CN.sk=k;CN.sd=+d;cnRender()});
+$('#cn-b').addEventListener('click',e=>{const tr=e.target.closest('tr[data-id]');if(!tr)return;if(e.target.closest('[data-close]')){cnClose(tr.dataset.id);return}cnDetail(tr.dataset.id)});
+$('#cn-view').addEventListener('click',e=>{const b=e.target.closest('button[data-v]');if(!b)return;CN.view=b.dataset.v;$('#cn-view').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cnRender()});
+$('#cnq').addEventListener('input',cnRender);$('#cn-pause').addEventListener('change',()=>{CN.last=0;cnRender()});
+async function cnClose(id){try{await mh('/connections/'+enc(id),'DELETE');toast('已断开连接');closeModal();cnPoll()}catch(e){toast(e.message,1)}}
+async function cnCloseAll(all){if(!all&&CN.view==='closed'){CN.closed=[];cnRender();return}
+ const q=all?'':$('#cnq').value.trim();if(q){const ids=cnList().map(r=>r.id);if(!ids.length)return;if(!confirm(`断开筛选出的 ${ids.length} 个连接？`))return;
+  const r=await Promise.allSettled(ids.map(id=>mh('/connections/'+enc(id),'DELETE')));toast(`已断开 ${r.filter(x=>x.status==='fulfilled').length} 个连接`)}
+ else{if(!confirm('断开所有活动连接？'))return;try{await mh('/connections','DELETE');toast('已断开所有连接')}catch(e){toast(e.message,1)}}
+ if(CUR==='conns')cnPoll()}
+function cnDetail(id){const r=CN.rows.find(x=>x.id===id)||CN.closed.find(x=>x.id===id);if(!r)return;const m=r.raw.metadata||{};
+ const kv=[['主机',m.host],['嗅探主机',m.sniffHost],['目标 IP',m.destinationIP],['目标端口',m.destinationPort],['远端目标',m.remoteDestination],['来源',r.src],['入站',[m.type,m.inboundName,m.inboundUser].filter(Boolean).join(' · ')],['网络',m.network],['DNS 模式',m.dnsMode],
+  ['进程',m.process],['进程路径',m.processPath],['UID',m.uid],['规则',r.rule],['链路',r.chain],['下载',fmtBytes(r.dl)],['上传',fmtBytes(r.ul)],['开始',new Date(r.start).toLocaleString('zh-CN',{hour12:false})],['结束',r.end?new Date(r.end).toLocaleString('zh-CN',{hour12:false}):''],['ID',r.id]]
+  .filter(x=>x[1]!==undefined&&x[1]!==null&&x[1]!=='');
+ modal('连接详情',`<div class="kvs">${kv.map(([k,v])=>`<b>${k}</b><span>${esc(v)}</span>`).join('')}</div><details><summary>原始 JSON</summary><pre>${esc(JSON.stringify(r.raw,null,2))}</pre></details>`,
+  r.end?'':`<button class="btn dan" onclick="cnClose('${attr(r.id)}')">断开此连接</button>`)}
+
+/* ---------- 生效规则 / 规则集 ---------- */
+const RR={rules:[],prov:{},limit:500};
+const RRC=t=>/^match$/i.test(t)?'c-match':/ruleset/i.test(t)?'c-rs':/^(domain|geosite)/i.test(t)?'c-dom':/(ip|asn)/i.test(t)?'c-ip':/^(and|or|not|subrules)$/i.test(t)?'':'c-proc';
+async function loadRtRules(){try{const [r,p]=await Promise.all([mh('/rules'),mh('/providers/rules').catch(()=>({providers:{}}))]);RR.rules=r.rules||[];RR.prov=p.providers||{};RR.limit=500;renderRtRules();renderRuleProviders()}
+ catch(e){$('#rrl').innerHTML=`<div class="empty bad">无法读取规则：${esc(e.message)}</div>`}}
+function renderRtRules(){const q=$('#rrq').value.trim().toLowerCase();const all=RR.rules.map((r,i)=>Object.assign({i},r));const l=q?all.filter(r=>`${r.type} ${r.payload} ${r.proxy}`.toLowerCase().includes(q)):all;
+ $('#rr-cnt').textContent=q?`${l.length} / ${all.length}`:all.length;
+ const size=r=>r.size>0?r.size:(/ruleset/i.test(r.type)&&RR.prov[r.payload]?RR.prov[r.payload].ruleCount:0);
+ $('#rrl').innerHTML=l.slice(0,RR.limit).map(r=>`<div class="rr ${RRC(r.type)}"><span class="i">${r.i+1}</span><span class="ty">${esc(r.type)}</span><span class="pl" title="${attr(r.payload)}">${hl(r.payload||'-',q)}${size(r)>0?` <span class="tag">${size(r).toLocaleString()} 条</span>`:''}</span><span class="px"><span class="dot ${polDot(r.proxy)}"></span>${hl(r.proxy,q)}</span></div>`).join('')||'<div class="empty">没有匹配的规则</div>';
+ const more=$('#rr-more');more.style.display=l.length>RR.limit?'':'none';more.textContent=`显示更多（还有 ${l.length-RR.limit} 条）`}
+$('#rrq').addEventListener('input',()=>{RR.limit=500;renderRtRules()});
+function renderRuleProviders(){const l=Object.values(RR.prov);$('#rp-cnt').textContent=l.length;$('#rp-card').style.display=l.length?'':'none';
+ $('#rps').innerHTML='<div class="lst">'+l.map(p=>`<div class="li" data-p="${attr(p.name)}"><span class="nm"><b>${esc(p.name)}</b> <span class="tag cyan">${esc(p.behavior||'')}</span> <span class="tag">${esc(p.vehicleType||'')}</span>${p.format?` <span class="tag">${esc(p.format)}</span>`:''}<small>${(p.ruleCount||0).toLocaleString()} 条规则 · 更新于 ${fmtUpd(p.updatedAt)}</small></span><span class="act"><button class="btn sm" data-act="up">↻ 更新</button></span></div>`).join('')+'</div>'}
+$('#rps').addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;const n=b.closest('.li').dataset.p;
+ await btnBusy(b,async()=>{try{await mh('/providers/rules/'+enc(n),'PUT');toast(`${n} 已更新`)}catch(ex){toast(`${n}：${ex.message}`,1)}});loadRtRules()});
+async function rpUpdateAll(b){const names=Object.keys(RR.prov);await btnBusy(b,async()=>{const r=await Promise.allSettled(names.map(n=>mh('/providers/rules/'+enc(n),'PUT')));const bad=r.filter(x=>x.status==='rejected').length;toast(bad?`${bad} 个规则集更新失败`:`已更新 ${names.length} 个规则集`,!!bad)});loadRtRules()}
+
+/* ---------- 内核设置 ---------- */
+let ST={};
+async function loadSettings(){try{const [c,v]=await Promise.all([mh('/configs'),mh('/version').catch(()=>({}))]);ST=c;MODE=String(c.mode||'');$('#st-ver').textContent=v.version?`内核 ${v.version}${v.meta?' · Meta':''}`:'';renderSettings();renderModeSw()}
+ catch(e){$('#st-grid').innerHTML=`<div class="empty bad">无法读取内核配置：${esc(e.message)}</div>`}}
+function renderSettings(){const c=ST,t=c.tun||{};
+ const num=(k,l,d)=>`<div class="sf"><b>${l}</b><input type="number" min="0" max="65535" data-k="${k}" value="${+c[k]||0}"><small>${d}</small></div>`;
+ const sw=(k,l,v,d)=>`<div class="sf"><b>${l}</b><label class="switch"><input type="checkbox" data-k="${k}" ${v?'checked':''}><i></i>${v?'已开启':'已关闭'}</label><small>${d}</small></div>`;
+ const sel=(k,l,opts,cur,d)=>`<div class="sf"><b>${l}</b><select data-k="${k}">${opts.map(o=>`<option value="${o.toLowerCase()}" ${String(cur||'').toLowerCase()===o.toLowerCase()?'selected':''}>${o}</option>`).join('')}</select><small>${d}</small></div>`;
+ $('#st-grid').innerHTML=`<div class="sf"><b>代理模式</b><span class="seg modesw" style="align-self:flex-start">${modeBtns()}</span><small>规则 / 全局 / 直连</small></div>`
+  +sel('log-level','日志级别',['silent','error','warning','info','debug'],c['log-level'],'决定实时日志能看到的内容')
+  +num('mixed-port','混合端口','HTTP + SOCKS5，0 表示关闭')+num('port','HTTP 端口','')+num('socks-port','SOCKS5 端口','')+num('redir-port','Redir 端口','Linux 透明代理')+num('tproxy-port','TProxy 端口','Linux 透明代理')
+  +sw('allow-lan','允许局域网连接',c['allow-lan'],c['bind-address']?`绑定地址 ${esc(c['bind-address'])}`:'')+sw('ipv6','IPv6',c.ipv6,'')+sw('sniffing','域名嗅探',c.sniffing,'')+sw('tcp-concurrent','TCP 并发',c['tcp-concurrent'],'同时连接解析出的所有 IP')
+  +sw('tun.enable','TUN 模式',t.enable,t.device?`设备 ${esc(t.device)}`:'')+sel('tun.stack','TUN 协议栈',['gVisor','System','Mixed'],t.stack,'')
+  +`<div class="sf"><b>出口网卡</b><input type="text" data-k="interface-name" value="${attr(c['interface-name']||'')}" placeholder="自动" spellcheck="false"><small>回车或移出输入框后应用</small></div>`}
+$('#st-grid').addEventListener('change',async e=>{const el=e.target,k=el.dataset.k;if(!k)return;let v=el.type==='checkbox'?el.checked:el.type==='number'?parseInt(el.value||'0',10):el.value.trim();
+ if(el.type==='number'&&(isNaN(v)||v<0||v>65535)){toast('端口范围 0–65535',1);renderSettings();return}
+ if(k==='tun.enable'&&!confirm(v?'开启 TUN 模式？':'关闭 TUN 模式？经 TUN 转发的流量会失去代理。')){renderSettings();return}
+ const body=k.startsWith('tun.')?{tun:{[k.slice(4)]:v}}:{[k]:v};
+ try{await mh('/configs','PATCH',body);toast(`已应用 ${k} = ${v}`)}catch(ex){toast(ex.message,1)}loadSettings()});
+async function stAct(a){const m={fakeip:['/cache/fakeip/flush','FakeIP 缓存已清空'],dns:['/cache/dns/flush','DNS 缓存已清空']}[a];try{await mh(m[0],'POST');toast(m[1])}catch(e){toast(e.message,1)}}
+async function stReload(){try{const r=await api('/api/service/reload',{});toast(r.ok?'已重载 config.yaml':r.output,!r.ok)}catch(e){toast(e.message,1)}}
+async function dnsQuery(){const n=$('#dq-name').value.trim();if(!n)return;const o=$('#dq-out');o.className='mut';o.textContent='查询中…';
+ try{const r=await mh(`/dns/query?name=${enc(n)}&type=${$('#dq-type').value}`);const ans=(r.Answer||[]).map(a=>`${a.name}  ${a.TTL}s  ${a.data}`).join('\n');o.className='';o.textContent=ans||`没有结果（Status ${r.Status??'-'}）`}
+ catch(e){o.className='bad';o.textContent=e.message}}
 
 /* ---------- kernel ---------- */
 let K=null;
@@ -1662,7 +2211,26 @@ function renderLogs(){const q=$('#logq').value.trim().toLowerCase();const lines=
  const p=$('#logs');p.innerHTML=html||'<span class="mut">（无匹配）</span>';$('#log-info').textContent=q?`${n} / ${lines.length} 行`:`${lines.length} 行`;p.scrollTop=p.scrollHeight}
 async function loadLogs(){try{const r=await api('/api/logs?n='+$('#logn').value);LOG_RAW=r.output;renderLogs()}catch(e){$('#logs').innerHTML=`<span class="l e">${esc(e.message)}</span>`}}
 $('#logq').addEventListener('input',renderLogs);$('#logn').addEventListener('change',loadLogs);
-setInterval(()=>{if($('#logauto').checked&&$('#t-logs').classList.contains('on'))loadLogs()},5000);
+setInterval(()=>{if($('#logauto').checked&&CUR==='logs'&&LG.src==='journal'&&!document.hidden)loadLogs()},5000);
+/* 实时内核日志（controller /logs 流） */
+const LG={items:[],max:1000,level:localStorage.getItem('lg-level')||'info',src:localStorage.getItem('lg-src')||'live',s:null,started:false,t:0};
+$('#lg-level').value=LG.level;
+function lgStart(){if(LG.s)return;LG.started=true;LG.s=openStream(`${MH}/logs?level=${enc(LG.level)}`,m=>{if($('#lg-pause').checked||!m.type)return;
+  LG.items.push({t:new Date(),type:String(m.type),payload:String(m.payload??'')});if(LG.items.length>LG.max)LG.items.splice(0,LG.items.length-LG.max);if(!LG.t)LG.t=setTimeout(renderLiveLogs,250)},
+  msg=>{if(CUR==='logs')$('#lg-info').innerHTML=`<span class="bad">${esc(msg)}</span>`})}
+function lgStop(){if(LG.s){LG.s.stop();LG.s=null}}
+function renderLiveLogs(){LG.t=0;if(CUR!=='logs'||LG.src!=='live')return;const box=$('#llog');const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<40;const q=$('#lgq').value.trim().toLowerCase();
+ const l=q?LG.items.filter(x=>x.payload.toLowerCase().includes(q)||x.type.includes(q)):LG.items;
+ box.innerHTML=l.map(x=>`<div class="ll ${esc(x.type)}"><span class="tm">${x.t.toLocaleTimeString('zh-CN',{hour12:false})}</span><span class="lv">${esc(x.type)}</span><span class="msg">${hl(x.payload,q)}</span></div>`).join('')||`<div class="mut" style="padding:8px 12px">${q?'（无匹配）':`等待日志…（级别 ${esc(LG.level)}，内核自身的 log-level 更高时也看不到更低级别）`}</div>`;
+ $('#lg-info').textContent=q?`${l.length} / ${LG.items.length} 条`:`${LG.items.length} 条`;if(atBottom||!LG.scrolled){box.scrollTop=box.scrollHeight;LG.scrolled=true}}
+function lgSrc(s){LG.src=s;localStorage.setItem('lg-src',s);const live=s==='live';$('#lg-src').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.s===s));
+ $('#lg-live-tb').style.display=live?'':'none';$('#lg-journal-tb').style.display=live?'none':'';$('#llog').style.display=live?'':'none';$('#logs').style.display=live?'none':'';
+ if(live){lgStart();renderLiveLogs()}else loadLogs()}
+function loadLogsTab(){lgSrc(LG.src)}
+$('#lg-src').addEventListener('click',e=>{const b=e.target.closest('button[data-s]');if(b)lgSrc(b.dataset.s)});
+$('#lg-level').addEventListener('change',e=>{LG.level=e.target.value;localStorage.setItem('lg-level',LG.level);lgStop();lgStart();toast('日志级别：'+LG.level)});
+$('#lgq').addEventListener('input',renderLiveLogs);$('#lg-pause').addEventListener('change',renderLiveLogs);
+document.addEventListener('visibilitychange',()=>{if(document.hidden){liveStop();lgStop()}else{liveStart();if(LG.started)lgStart()}});
 
 /* ---------- config ---------- */
 let CFG_RAW='';
@@ -1670,7 +2238,7 @@ function renderCfg(){const q=$('#cfq').value.trim().toLowerCase();$('#cfg').text
 async function loadConfig(){const r=await api('/api/config');CFG_RAW=r.content;renderCfg();$('#cf-info').textContent=r.info?`config.yaml · ${r.info.mtime_str} · ${fmtBytes(r.info.size)} · ${CFG_RAW.split('\n').length} 行`:'';stickTop()}
 $('#cfq').addEventListener('input',renderCfg);
 
-const H0=location.hash.slice(1);if(H0&&H0!=='status'&&LOADERS[H0])showTab(H0,false);loadStatus();setInterval(loadStatus,30000);stickTop();api('/api/kernel').then(k=>{if(k.latest_stable&&cmpVer(k.latest_stable,k.current.version)>0)$('#nav-upd').className='dotn'}).catch(()=>{});
+const H0=location.hash.slice(1);renderModeSw();if(H0&&H0!=='status'&&LOADERS[H0])showTab(H0,false);loadStatus();liveStart();setInterval(loadStatus,30000);stickTop();api('/api/kernel').then(k=>{if(k.latest_stable&&cmpVer(k.latest_stable,k.current.version)>0)$('#nav-upd').className='dotn'}).catch(()=>{});
 </script></body></html>
 """
 
