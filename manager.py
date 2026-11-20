@@ -2015,10 +2015,12 @@ $('#px').addEventListener('click',e=>{const card=e.target.closest('.pgc');if(!ca
  const nd=e.target.closest('.nd');if(nd){if(nd.classList.contains('sel'))pxSelect(g,nd.dataset.n);return}
  if(a&&a.dataset.act==='toggle')pxToggle(g)});
 ['pxq','pxsort','pxhide'].forEach(id=>$('#'+id).addEventListener(id==='pxq'?'input':'change',renderProxies));
-async function pxRefresh(){try{PX.proxies=(await mh('/proxies')).proxies||{}}catch(e){}renderProxies()}
+/* 订阅（proxy-providers）里的节点不一定出现在 /proxies 中，合并进来才有类型 / UDP / 延迟历史 */
+function pxMerge(p,pv){const P=Object.assign({},p.proxies||{});Object.values(pv.providers||{}).forEach(v=>(v.proxies||[]).forEach(x=>{if(x&&x.name&&!P[x.name])P[x.name]=x}));return P}
+async function pxRefresh(){try{const [p,pv]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}}))]);PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{}}catch(e){}renderProxies()}
 async function loadProxies(){$('#px-url').value=PXS.url;$('#px-to').value=PXS.to;$('#px-autoclose').checked=PXS.autoclose;
  try{const [p,pv,c]=await Promise.all([mh('/proxies'),mh('/providers/proxies').catch(()=>({providers:{}})),mh('/configs').catch(()=>null)]);
-  PX.proxies=p.proxies||{};PX.providers=pv.providers||{};if(c){MODE=String(c.mode||'');renderModeSw()}renderProxies();renderProviders()}
+  PX.proxies=pxMerge(p,pv);PX.providers=pv.providers||{};if(c){MODE=String(c.mode||'');renderModeSw()}renderProxies();renderProviders()}
  catch(e){$('#px').innerHTML=`<div class="empty bad">无法读取代理列表：${esc(e.message)}</div>`}}
 function pxSaveSet(){const u=$('#px-url').value.trim(),t=parseInt($('#px-to').value,10);if(!/^https?:\/\//.test(u)){toast('测速地址需以 http(s):// 开头',1);return}
  PXS.url=u;PXS.to=t>0?t:5000;PXS.autoclose=$('#px-autoclose').checked;localStorage.setItem('px-url',PXS.url);localStorage.setItem('px-to',PXS.to);localStorage.setItem('px-autoclose',PXS.autoclose?'1':'0');toast('已保存');renderProxies()}
