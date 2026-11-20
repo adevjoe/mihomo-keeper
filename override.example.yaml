@@ -12,11 +12,9 @@
 #
 # 下面全部是示例值，请换成你自己的设置。
 
-# ---- 外部面板（如 metacubexd），ui 目录相对 mihomo 工作目录 ----
-# 面板需要从局域网访问时监听 0.0.0.0，并务必设置 secret
-# external-controller: 0.0.0.0:9090
-# secret: change-me            # 控制器密钥；管理页「打开面板」链接会自动带上
-# external-ui: ui              # 把 metacubexd 构建产物放到 $MIHOMO_DIR/ui
+# ---- controller：管理页内置面板经后端访问它，只监听本机即可 ----
+# external-controller: 127.0.0.1:9090
+# secret: change-me            # 控制器密钥，只在管理页后端使用
 
 # ---- 测速 / 连接调优 ----
 unified-delay: true
